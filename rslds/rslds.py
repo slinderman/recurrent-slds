@@ -153,34 +153,11 @@ class InputSLDS(_SLDSGibbsMixin, InputHMM):
     def __init__(self, dynamics_distns, emission_distns, init_dynamics_distns,
                  fixed_emission=False, **kwargs):
 
-        # self.init_dynamics_distns = init_dynamics_distns
-        # self.dynamics_distns = dynamics_distns
-        #
-        # # Allow for a single, shared emission distribution
-        # if not isinstance(emission_distns, list):
-        #     self._single_emission = True
-        #     self._emission_distn = emission_distns
-        #     self.emission_distns = [emission_distns] * len(self.dynamics_distns)
-        # else:
-        #     assert isinstance(emission_distns, list) and \
-        #            len(emission_distns) == len(dynamics_distns)
-        #     self._single_emission = False
-        #     self.emission_distns = emission_distns
-        #
-        # super(_SLDSMixin, self).__init__(
-        #     obs_distns=self.dynamics_distns, **kwargs)
-        #
-        #
-        # self.init_dynamics_distns = init_dynamics_distns
-        # self.dynamics_distns = dynamics_distns
-        # self.emission_distns = emission_distns
         self.fixed_emission = fixed_emission
 
-        # TODO: Will this just work?
-        kwargs["D_in"] = dynamics_distns[0].D_out
-
         super(InputSLDS, self).__init__(
-            dynamics_distns, emission_distns, init_dynamics_distns, **kwargs)
+            dynamics_distns, emission_distns, init_dynamics_distns,
+            D_in=dynamics_distns[0].D_out, **kwargs)
 
     def resample_trans_distn(self):
         # Include the auxiliary variables used for state resampling
@@ -218,6 +195,7 @@ class InputSLDS(_SLDSGibbsMixin, InputHMM):
         if self.fixed_emission:
             return
         super(InputSLDS, self).resample_emission_distns()
+
 
 class StickyInputSLDS(InputSLDS):
     _trans_class = StickyInputHMMTransitions
