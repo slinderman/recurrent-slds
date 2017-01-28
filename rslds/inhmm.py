@@ -13,12 +13,12 @@ from rslds.util import one_hot, psi_to_pi
 
 
 ##############################################################################
-# Outline for extending an HMM to IO-HMM with mix-ins 
-#    1. create a transitions base class that creates stacks of covariance
-#       matrices given a matrix of inputs
-#    2. create a Gibbs mix-in that resamples transition parameters given 
-#       realized discrete state sequences
-#
+# Outline for extending an HMM to IO-HMM with mix-ins                        #
+#    1. create a transitions base class that creates stacks of transition    #
+#       matrices given a matrix of inputs                                    #
+#    2. create a Gibbs mix-in that resamples transition parameters given     #
+#       realized discrete state sequences                                    #
+#                                                                            #
 ##############################################################################
 
 ### Polya-gamma input model
@@ -46,13 +46,12 @@ class InputHMMTransitions(MultinomialRegression):
         psi_X = X.dot(W_covs.T)
 
         # compute the transmat stack without the covariate contributions
-        # warn("inhmm get_trans_matrices: Testing state dependence only")
-        # psi_Z = np.zeros_like(W_markov.T)
         psi_Z = W_markov.T
 
         # add the (K x K-1) and (T x K-1) matrices together such that they 
         # broadcast into a [T x K x K-1] stack of trans matrices
         trans_psi = psi_X[:, None, :] + psi_Z
+
         # Add the (K-1) mean
         trans_psi += mu.reshape((self.D_out,))
 
@@ -65,10 +64,8 @@ class InputHMMTransitions(MultinomialRegression):
         and use the PGMult class to resample """
         # assemble all of the discrete states into a dataset
         def align_lags(stateseq, covseq):
-            prev_state  = one_hot(stateseq[:-1], self.num_states)
-            next_state  = one_hot(stateseq[1:], self.num_states)
-            # warn("inhmm resample: Testing state dependence only")
-            # return np.column_stack([np.zeros_like(prev_state), covseq]), next_state
+            prev_state = one_hot(stateseq[:-1], self.num_states)
+            next_state = one_hot(stateseq[1:], self.num_states)
             return np.column_stack([prev_state, covseq]), next_state
 
         # Get the stacked previous states, covariates, and next states
@@ -77,9 +74,7 @@ class InputHMMTransitions(MultinomialRegression):
         # Clip the last data column since it is redundant
         # and not expected by the MultinomialRegression
         datas = [(x, y[:,:-1]) for x, y in datas]
-
         masks = [np.ones(y.shape, dtype=bool) for _,y in datas]
-
         super(InputHMMTransitions, self).\
             resample(datas, mask=masks, omega=omegas)
 
@@ -133,9 +128,7 @@ class InputOnlyHMMTransitions(InputHMMTransitions):
         # Clip the last data column since it is redundant
         # and not expected by the MultinomialRegression
         datas = [(x, y[:,:-1]) for x, y in datas]
-
         masks = [np.ones(y.shape, dtype=bool) for _,y in datas]
-
         super(InputHMMTransitions, self).\
             resample(datas, mask=masks, omega=omegas)
 
@@ -183,6 +176,19 @@ class StickyInputOnlyHMMTransitions(InputHMMTransitions):
             __init__(num_states, covariate_dim, **kwargs)
 
 
+class SoftmaxInputHMMTransitions:
+    """
+    Like above but with a softmax transition model.
+
+    log p(z_{t+1} | z_t, x_t) = z_t^T log pi z_{t+1} + x_t^T W z_{t+1} - Z
+
+    where Z = log ( \sum_k exp { z_t^T log pi e_k + x_t^T W e_k} )
+    """
+    # TODO: This needs to be implemented.  The updates for the
+    #       transition parameters will no longer be conjugate though.
+    pass
+
+
 class InputHMMStates(HMMStatesEigen):
 
     def __init__(self, covariates, *args, **kwargs):
@@ -208,19 +214,18 @@ class InputHMMStates(HMMStatesEigen):
             trans_matrix_seq=self.trans_matrix,  # stack of matrices
             init_state_distn=np.ones(self.num_states) / float(self.num_states))
 
-    #############################################
-    # forward messages and backward resampling  #
-    #############################################
+    ### forward messages and backward resampling
     def sample_backwards_normalized(self, alphan):
         Tmat = self.trans_matrix
         AT = np.ascontiguousarray(np.array([Tmat[t, :, :].T for t in range(Tmat.shape[0])]))
         self.stateseq = self._sample_backwards_normalized(alphan, AT)
 
 
-###############################################
-# 3. HMM Model with time varying covariates   #
-###############################################
+### HMM Model with time varying covariates
 class _InputHMMMixin(object):
+
+    # Subclasses must specify the type of transition model
+    _trans_class = None
 
     # custom init method, just so we call custom input trans class stuff
     def __init__(self,
@@ -317,10 +322,11 @@ class InputARHMM(_InputHMMMixin, _ARMixin, _HMMGibbsSampling):
 
 
 class RecurrentARHMM(InputARHMM):
+    """
+    In the "recurrent" version, the data are the covariates.
+    """
+    # TODO: We should also allow for (data, inputs) to be covariates
     def add_data(self, data, **kwargs):
-        """
-        data _are_ the covariates.
-        """
         assert "covariates" not in kwargs
         covariates = np.row_stack((np.zeros(self.D),
                                    data[:-1]))
@@ -328,7 +334,6 @@ class RecurrentARHMM(InputARHMM):
 
     def generate(self, T=100, keep=True, init_data=None, covariates=None, with_noise=True):
         from pybasicbayes.util.stats import sample_discrete
-        # TODO: Handle inputs
         # Generate from the prior and raise exception if unstable
         K, n = self.num_states, self.D
 

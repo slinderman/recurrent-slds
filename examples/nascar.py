@@ -38,7 +38,8 @@ from pypolyagamma.distributions import MultinomialRegression
 from pinkybrain.models import MixedEmissionHMMSLDS
 
 from rslds.decision_list import DecisionList
-from rslds.rslds import InputSLDS, StickyInputSLDS, InputOnlySLDS, StickyInputOnlySLDS
+from rslds.rslds import RecurrentSLDS, StickyRecurrentSLDS, \
+    RecurrentOnlySLDS, StickyRecurrentOnlySLDS
 from rslds.util import compute_psi_cmoments
 
 ### Global parameters
@@ -500,7 +501,7 @@ def simulate_nascar():
                            alpha_0=2.0, beta_0=2.0)
     ]
 
-    model = InputSLDS(
+    model = RecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
                           sigmasq_A=100., sigmasq_b=100.),
@@ -694,7 +695,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = InputSLDS(
+    rslds = RecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
@@ -742,7 +743,7 @@ def fit_sticky_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyInputSLDS(
+    rslds = StickyRecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000., kappa=100.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
@@ -789,7 +790,7 @@ def fit_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = InputOnlySLDS(
+    rslds = RecurrentOnlySLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
@@ -836,7 +837,7 @@ def fit_sticky_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyInputOnlySLDS(
+    rslds = StickyRecurrentOnlySLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           kappa=1., sigmasq_kappa=1.0,

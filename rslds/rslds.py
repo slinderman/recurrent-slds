@@ -10,17 +10,24 @@ from rslds.inhmm import InputHMMTransitions, InputHMMStates, \
     StickyInputOnlyHMMTransitions
 from rslds.util import one_hot
 
-class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMStates):
+##############################################################################
+# The recurrent SLDS is basically a combo of the Input HMM and SLDS          #
+# However, we need a few enhancements. The latent states need to how to      #
+# update the continuous values given the discrete states.                    #
+##############################################################################
+class RecurrentSLDSStates(_SLDSStatesCountData,
+                          _SLDSStatesMaskedData,
+                          InputHMMStates):
     """
-    Include the multinomial emissions from the discrete states
-    as observations in the model.
+    Effectively, the multinomial emissions from the discrete states
+    as observations for the continuous states.
     """
     def __init__(self, model, covariates=None, data=None, mask=None, fixed_stateseq=None, **kwargs):
         # By definition, the covariates are the latent gaussian states
         if covariates is not None:
             raise NotImplementedError("Not supporting exogenous inputs yet")
 
-        super(InputSLDSStates, self).\
+        super(RecurrentSLDSStates, self).\
             __init__(model, data=data, mask=mask,
                      fixed_stateseq=fixed_stateseq, **kwargs)
 
@@ -29,8 +36,6 @@ class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMState
 
         # Set the covariates to be the gaussian states
         self.covariates = self.gaussian_states[:-1].copy()
-        # warn("__init__: zero out covariates")
-        # self.covariates *= 0
 
         # Initialize auxiliary variables for transitions
         self.trans_omegas = np.ones((self.T-1, self.num_states-1))
@@ -77,8 +82,7 @@ class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMState
 
     @property
     def info_emission_params(self):
-        J_node, h_node, log_Z_node = super(InputSLDSStates, self).info_emission_params
-        # warn("info emission params: no inputs")
+        J_node, h_node, log_Z_node = super(RecurrentSLDSStates, self).info_emission_params
         J_node_trans, h_node_trans = self.info_trans_params
         J_node[:-1] += J_node_trans
         h_node[:-1] += h_node_trans
@@ -104,7 +108,6 @@ class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMState
         kappa = trans_distn.kappa_func(next_state[:,:-1])
         h_node = kappa.dot(C)
         h_node -= (omega * b.T).dot(C)
-        # warn("info_emission_params: Testing state dependence only")
         h_node -= (omega * prev_state.dot(A.T)).dot(C)
         # h_node[:-1] -= (omega * self.inputs.dot(D.T)).dot(C)
 
@@ -113,13 +116,11 @@ class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMState
         return J_node, h_node
 
     def resample_gaussian_states(self):
-        super(InputSLDSStates, self).resample_gaussian_states()
+        super(RecurrentSLDSStates, self).resample_gaussian_states()
         self.covariates = self.gaussian_states[:-1].copy()
-        # warn("resample_gaussian_states: zero out covariates")
-        # self.covariates *= 0
 
     def resample_auxiliary_variables(self):
-        super(InputSLDSStates, self).resample_auxiliary_variables()
+        super(RecurrentSLDSStates, self).resample_auxiliary_variables()
         self.resample_transition_auxiliary_variables()
 
     def resample_transition_auxiliary_variables(self):
@@ -133,7 +134,6 @@ class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMState
         # D = trans_distn.A[:, self.num_states+self.D_latent:]
         b = trans_distn.b
 
-        # warn("resample_transition_aux_variables: Testing state dependence only")
         psi = prev_state.dot(A.T) \
               + self.covariates.dot(C.T) \
               + b.T \
@@ -145,9 +145,9 @@ class InputSLDSStates(_SLDSStatesCountData, _SLDSStatesMaskedData, InputHMMState
         assert not np.allclose(omega0, self.trans_omegas)
 
 
-class InputSLDS(_SLDSGibbsMixin, InputHMM):
+class RecurrentSLDS(_SLDSGibbsMixin, InputHMM):
 
-    _states_class = InputSLDSStates
+    _states_class = RecurrentSLDSStates
     _trans_class = InputHMMTransitions
 
     def __init__(self, dynamics_distns, emission_distns, init_dynamics_distns,
@@ -155,7 +155,7 @@ class InputSLDS(_SLDSGibbsMixin, InputHMM):
 
         self.fixed_emission = fixed_emission
 
-        super(InputSLDS, self).__init__(
+        super(RecurrentSLDS, self).__init__(
             dynamics_distns, emission_distns, init_dynamics_distns,
             D_in=dynamics_distns[0].D_out, **kwargs)
 
@@ -194,16 +194,16 @@ class InputSLDS(_SLDSGibbsMixin, InputHMM):
     def resample_emission_distns(self):
         if self.fixed_emission:
             return
-        super(InputSLDS, self).resample_emission_distns()
+        super(RecurrentSLDS, self).resample_emission_distns()
 
 
-class StickyInputSLDS(InputSLDS):
+class StickyRecurrentSLDS(RecurrentSLDS):
     _trans_class = StickyInputHMMTransitions
 
 
-class InputOnlySLDS(InputSLDS):
+class RecurrentOnlySLDS(RecurrentSLDS):
     _trans_class = InputOnlyHMMTransitions
 
 
-class StickyInputOnlySLDS(InputSLDS):
+class StickyRecurrentOnlySLDS(RecurrentSLDS):
     _trans_class = StickyInputOnlyHMMTransitions
