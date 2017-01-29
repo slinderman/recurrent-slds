@@ -5,8 +5,10 @@ from pyslds.models import _SLDSGibbsMixin
 
 import pypolyagamma as ppg
 
-from rslds.inhmm import InputHMMTransitions, InputHMMStates, \
+from rslds.inhmm import InputHMMStates, \
     InputHMM, StickyInputHMMTransitions, InputOnlyHMMTransitions, \
+    StickyInputOnlyHMMTransitions
+from rslds.transitions import InputHMMTransitions, StickyInputHMMTransitions, InputOnlyHMMTransitions, \
     StickyInputOnlyHMMTransitions
 from rslds.util import one_hot
 

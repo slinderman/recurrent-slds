@@ -3,35 +3,21 @@ np.random.seed(0)
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
 import seaborn as sns
 sns.set_style("white")
-
-from pybasicbayes.distributions import Gaussian
-
-from rslds.inhmm import InputHMM
-
 import seaborn as sns
 color_names = ["red",
                "windows blue",
                "medium green",
-               # "dusty purple",
                "orange",
-               # "amber",
-               # "clay",
-               # "pink",
-               # "greyish",
-               # "light cyan",
-               # "steel blue",
-               # "forest green",
-               # "pastel purple",
-               # "mint",
-               # "salmon",
-               # "dark brown"
                ]
 colors = sns.xkcd_palette(color_names)
 from hips.plotting.colormaps import gradient_cmap
 cmap = gradient_cmap(colors)
+
+from pybasicbayes.distributions import Gaussian
+from rslds.inhmm import InputHMM
+
 
 #################################################
 # create the "true" model and true covariates   #

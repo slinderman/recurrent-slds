@@ -1,192 +1,19 @@
 import numpy as np
-
 from pybasicbayes.util.stats import sample_discrete
-
-from pyhsmm.models import _HMMGibbsSampling
-from pyhsmm.internals.hmm_states import HMMStatesEigen
 from pyhsmm.internals import initial_state
-
-from pypolyagamma.distributions import MultinomialRegression
-
-from rslds.util import one_hot, psi_to_pi
-
+from pyhsmm.internals.hmm_states import HMMStatesEigen
+from pyhsmm.models import _HMMGibbsSampling
+from rslds.transitions import InputHMMTransitions, InputOnlyHMMTransitions, StickyInputOnlyHMMTransitions
 
 
 ##############################################################################
 # Outline for extending an HMM to IO-HMM with mix-ins                        #
 #    1. create a transitions base class that creates stacks of transition    #
-#       matrices given a matrix of inputs                                    #
+#       matrices given a matrix of inputs (see transitions.py)               #
 #    2. create a Gibbs mix-in that resamples transition parameters given     #
 #       realized discrete state sequences                                    #
 #                                                                            #
 ##############################################################################
-
-### Polya-gamma input model
-class InputHMMTransitions(MultinomialRegression):
-    """
-    Model the transition probability as a multinomial
-    regression whose inputs include the previous state
-    as well as some covariates. For example, the covariates
-    could be an external signal or even the latent states
-    of a switching linear dynamical system.
-    """
-    def __init__(self, num_states, covariate_dim, **kwargs):
-        super(InputHMMTransitions, self).\
-            __init__(1, num_states, num_states+covariate_dim, **kwargs)
-        self.num_states = num_states
-        self.covariate_dim = covariate_dim
-
-    def get_trans_matrices(self, X):
-        """ return a stack of transition matrices, one for each input """
-        mu, W = self.b, self.A
-        W_markov = W[:,:self.num_states]
-        W_covs = W[:,self.num_states:]
-
-        # compute the contribution of the covariate to transmat
-        psi_X = X.dot(W_covs.T)
-
-        # compute the transmat stack without the covariate contributions
-        psi_Z = W_markov.T
-
-        # add the (K x K-1) and (T x K-1) matrices together such that they 
-        # broadcast into a [T x K x K-1] stack of trans matrices
-        trans_psi = psi_X[:, None, :] + psi_Z
-
-        # Add the (K-1) mean
-        trans_psi += mu.reshape((self.D_out,))
-
-        pi_stack = psi_to_pi(trans_psi, axis=2)
-        pi_stack = np.ascontiguousarray(pi_stack)
-        return pi_stack
-
-    def resample(self, stateseqs=None, covseqs=None, omegas=None, **kwargs):
-        """ conditioned on stateseqs and covseqs, stack up all of the data
-        and use the PGMult class to resample """
-        # assemble all of the discrete states into a dataset
-        def align_lags(stateseq, covseq):
-            prev_state = one_hot(stateseq[:-1], self.num_states)
-            next_state = one_hot(stateseq[1:], self.num_states)
-            return np.column_stack([prev_state, covseq]), next_state
-
-        # Get the stacked previous states, covariates, and next states
-        datas = [align_lags(z,x) for z, x in zip(stateseqs, covseqs)]
-
-        # Clip the last data column since it is redundant
-        # and not expected by the MultinomialRegression
-        datas = [(x, y[:,:-1]) for x, y in datas]
-        masks = [np.ones(y.shape, dtype=bool) for _,y in datas]
-        super(InputHMMTransitions, self).\
-            resample(datas, mask=masks, omega=omegas)
-
-
-class StickyInputHMMTransitions(InputHMMTransitions):
-    """
-    Introduce a "stickiness" parameter to capture the tendency
-    to stay in the same state. In the standard InputHMM model,
-
-    psi_t = W_markov * I[z_{t-1}] + W_input * x_{t-1} + b.
-
-    Now we want W_markov[k,k] ~ N(kappa, sigma^2) with kappa > 0,
-    and W_markov[k,j] ~ N(0, sigma^2) for j \neq k.
-    """
-    def __init__(self, num_states, covariate_dim, kappa=1.0, **kwargs):
-        assert "mu_A" not in kwargs, "StickyInputHMMTransitions overrides provided mu_A"
-        mu_A = np.zeros((num_states-1, num_states+covariate_dim))
-        mu_A[:,:num_states-1] = kappa * np.eye(num_states-1)
-        kwargs["mu_A"] = mu_A
-
-        super(StickyInputHMMTransitions, self).\
-            __init__(num_states, covariate_dim, **kwargs)
-
-
-class InputOnlyHMMTransitions(InputHMMTransitions):
-    """
-    Model the transition probability as a multinomial
-    regression that depends only on the covariates.
-    For example, the covariates
-    could be an external signal or even the latent states
-    of a switching linear dynamical system.
-    """
-    def __init__(self, num_states, covariate_dim, **kwargs):
-        super(InputOnlyHMMTransitions, self).\
-            __init__(num_states, covariate_dim, **kwargs)
-        self.A[:,:self.num_states] = 0
-
-    def resample(self, stateseqs=None, covseqs=None, omegas=None, **kwargs):
-        """ conditioned on stateseqs and covseqs, stack up all of the data
-        and use the PGMult class to resample """
-
-        # Zero out the previous state in the regression
-        def align_lags(stateseq, covseq):
-            prev_state = np.zeros((stateseq.shape[0]-1, self.num_states))
-            next_state = one_hot(stateseq[1:], self.num_states)
-            return np.column_stack([prev_state, covseq]), next_state
-
-        # Get the stacked previous states, covariates, and next states
-        datas = [align_lags(z,x) for z, x in zip(stateseqs, covseqs)]
-
-        # Clip the last data column since it is redundant
-        # and not expected by the MultinomialRegression
-        datas = [(x, y[:,:-1]) for x, y in datas]
-        masks = [np.ones(y.shape, dtype=bool) for _,y in datas]
-        super(InputHMMTransitions, self).\
-            resample(datas, mask=masks, omega=omegas)
-
-        # Zero out the weights on the previous state
-        self.A[:, :self.num_states] = 0
-
-
-class StickyInputOnlyHMMTransitions(InputHMMTransitions):
-    """
-    Hacky way to implement the sticky input only model in which
-
-    psi_{t,k} | z_{t-1} =
-        kappa_k + w_j \dot x_{t-1} + b_j     if z_{t-1} = k
-        0       + w_j \dot x_{t-1} + b_j     otherwise
-
-    We just set the prior such that the off-diagonal entries of
-    W_{markov} are effectively zero by setting the variance of
-    these entries to be super small.
-    """
-    def __init__(self, num_states, covariate_dim, kappa=1.0, sigmasq_kappa=1e-8, **kwargs):
-
-        # Set the mean of A
-        K, D = num_states, covariate_dim
-        assert "mu_A" not in kwargs, "StickyInputHMMTransitions overrides provided mu_A"
-        mu_A = np.zeros((K-1, K+D))
-        mu_A[:,:K-1] = kappa * np.eye(K-1)
-        kwargs["mu_A"] = mu_A
-
-        # Set the covariance of A
-        if "sigmasq_A" in kwargs:
-            assert np.isscalar(kwargs["sigmasq_A"])
-            sig0 = kwargs["sigmasq_A"]
-        else:
-            sig0 = 1.0
-
-        sigmasq_A = np.zeros((K-1, K+D, K+D))
-        for k in range(K-1):
-            sigmasq_A[k, :K, :K] = 1e-8 * np.eye(K)
-            sigmasq_A[k,  k,  k] = sigmasq_kappa
-            sigmasq_A[k, K:, K:] = sig0 * np.eye(D)
-
-        kwargs["sigmasq_A"] = sigmasq_A
-
-        super(StickyInputOnlyHMMTransitions, self).\
-            __init__(num_states, covariate_dim, **kwargs)
-
-
-class SoftmaxInputHMMTransitions:
-    """
-    Like above but with a softmax transition model.
-
-    log p(z_{t+1} | z_t, x_t) = z_t^T log pi z_{t+1} + x_t^T W z_{t+1} - Z
-
-    where Z = log ( \sum_k exp { z_t^T log pi e_k + x_t^T W e_k} )
-    """
-    # TODO: This needs to be implemented.  The updates for the
-    #       transition parameters will no longer be conjugate though.
-    pass
 
 
 class InputHMMStates(HMMStatesEigen):
@@ -213,12 +40,6 @@ class InputHMMStates(HMMStatesEigen):
             T=self.T,
             trans_matrix_seq=self.trans_matrix,  # stack of matrices
             init_state_distn=np.ones(self.num_states) / float(self.num_states))
-
-    ### forward messages and backward resampling
-    def sample_backwards_normalized(self, alphan):
-        Tmat = self.trans_matrix
-        AT = np.ascontiguousarray(np.array([Tmat[t, :, :].T for t in range(Tmat.shape[0])]))
-        self.stateseq = self._sample_backwards_normalized(alphan, AT)
 
 
 ### HMM Model with time varying covariates
@@ -291,8 +112,6 @@ class _InputHMMMixin(object):
         return (data, covariates), s.stateseq
 
     def resample_trans_distn(self):
-        # TODO: concatenate before sending these.
-        # It should speed up gradient calcs by removing the for loop
         self.trans_distn.resample(
             stateseqs=[s.stateseq for s in self.states_list],
             covseqs=[s.covariates for s in self.states_list],
