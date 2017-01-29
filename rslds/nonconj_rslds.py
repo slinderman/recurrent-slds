@@ -13,8 +13,6 @@ class NonconjugateRecurrentSLDSStates(_SLDSStatesMaskedData):
 
     This class will do HMC.
     """
-    pass
-
     def joint_log_probability(self, x):
         # A differentiable function to compute the joint probability for a given
         # latent state sequence
@@ -44,7 +42,7 @@ class NonconjugateRecurrentSLDSStates(_SLDSStatesMaskedData):
 
         return ll / T
 
-    def resample(self, step_sz=0.01, n_steps=10):
+    def resample_gaussian_states(self, step_sz=0.01, n_steps=10):
         # Run HMC
         from hips.inference.hmc import hmc
         nll = lambda x: -1 * self.joint_log_probability(anp.reshape(x, (self.T, self.D_latent)))

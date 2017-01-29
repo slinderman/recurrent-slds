@@ -3,7 +3,8 @@ from pybasicbayes.util.stats import sample_discrete
 from pyhsmm.internals import initial_state
 from pyhsmm.internals.hmm_states import HMMStatesEigen
 from pyhsmm.models import _HMMGibbsSampling
-from rslds.transitions import InputHMMTransitions, InputOnlyHMMTransitions, StickyInputOnlyHMMTransitions
+from rslds.transitions import InputHMMTransitions, InputOnlyHMMTransitions, \
+    StickyInputOnlyHMMTransitions, SoftmaxInputHMMTransitions, SoftmaxInputOnlyHMMTransitions
 
 
 ##############################################################################
@@ -123,7 +124,19 @@ class InputHMM(_InputHMMMixin, _HMMGibbsSampling):
     _trans_class = InputHMMTransitions
     _states_class = InputHMMStates
 
+class InputOnlyHMM(InputHMM):
+    _trans_class = InputOnlyHMMTransitions
 
+class StickyInputOnlyHMM(InputHMM):
+    _trans_class = StickyInputOnlyHMMTransitions
+
+class SoftmaxInputHMM(InputHMM):
+    _trans_class = SoftmaxInputHMMTransitions
+
+class SoftmaxInputOnlyHMM(InputHMM):
+    _trans_class = SoftmaxInputOnlyHMMTransitions
+
+### ARHMM's
 from autoregressive.models import _ARMixin
 from autoregressive.util import AR_striding
 class InputARHMM(_InputHMMMixin, _ARMixin, _HMMGibbsSampling):
@@ -139,7 +152,17 @@ class InputARHMM(_InputHMMMixin, _ARMixin, _HMMGibbsSampling):
         assert strided_data.shape[0] == lagged_covariates.shape[0]
         super(InputARHMM, self).add_data(data=strided_data,covariates=lagged_covariates,**kwargs)
 
+class InputOnlyARHMM(InputARHMM):
+    _trans_class = InputOnlyHMMTransitions
 
+class StickyInputOnlyARHMM(InputARHMM):
+    _trans_class = StickyInputOnlyHMMTransitions
+
+class SoftmaxInputARHMM(InputARHMM):
+    _trans_class = SoftmaxInputHMMTransitions
+
+
+### Recurrent ARHMM's
 class RecurrentARHMM(InputARHMM):
     """
     In the "recurrent" version, the data are the covariates.
@@ -191,6 +214,8 @@ class RecurrentARHMM(InputARHMM):
 class InputOnlyRecurrentARHMM(RecurrentARHMM):
     _trans_class = InputOnlyHMMTransitions
 
-
 class StickyInputOnlyRecurrentARHMM(RecurrentARHMM):
     _trans_class = StickyInputOnlyHMMTransitions
+
+class SoftmaxRecurrentARHMM(RecurrentARHMM):
+    _trans_class = SoftmaxInputHMMTransitions
