@@ -197,6 +197,22 @@ class SoftmaxInputHMMTransitions(object):
         self.accept_rate = 0.9
         self.target_accept_rate = 0.9
 
+    ### Mean field
+    #   TODO: Implement variational factors for W and logpi
+    @property
+    def expected_W(self):
+        return self.W
+
+    @property
+    def expected_logpi(self):
+        return self.logpi
+
+    @property
+    def exp_expected_logpi(self):
+        P = anp.exp(self.logpi)
+        P /= anp.sum(P, axis=1, keepdims=True)
+        return P
+
     def get_log_trans_matrices(self, X):
         """
         Get log transition matrices as a function of X

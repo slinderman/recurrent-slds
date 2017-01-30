@@ -1,10 +1,11 @@
 from rslds.rslds import RecurrentSLDS, RecurrentSLDSStates
 from rslds.transitions import SoftmaxInputHMMTransitions, SoftmaxInputOnlyHMMTransitions
+from rslds.util import logistic
 
 import autograd.numpy as anp
 from autograd import grad
 
-class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
+class _NonconjugateRecurrentSLDSStatesGibbs(RecurrentSLDSStates):
     """
     When the transition model is not amenable to PG augmentation, we
     need an alternative approach.  Many methods could apply:
@@ -16,7 +17,7 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
     """
 
     def __init__(self, model, **kwargs):
-        super(NonconjugateRecurrentSLDSStates, self).__init__(model, **kwargs)
+        super(_NonconjugateRecurrentSLDSStatesGibbs, self).__init__(model, **kwargs)
 
         # HMC params
         self.step_sz = 1e-5
@@ -82,6 +83,139 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
 
     def resample_transition_auxiliary_variables(self):
         pass
+
+
+class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
+    """
+    Implement meanfield variational inference with the JJ96 lower bound.
+    """
+    def __init__(self, model, **kwargs):
+        super(_NonconjugateRecurrentSLDSStatesMeanField, self).__init__(model, **kwargs)
+        self.a = anp.zeros((self.T-1,))
+        self.bs = anp.zeros((self.T-1, self.num_states))
+
+    @property
+    def lambda_bs(self):
+        return 0.5 / self.bs * (logistic(self.bs) - 0.5)
+
+    ### Updates for q(x)
+    @property
+    def expected_info_rec_params(self):
+        """
+        Compute J_rec and h_rec
+        """
+        E_z = self.expected_states
+        E_W = self.trans_distn.expected_W
+        E_logpi = self.trans_distn.expected_logpi
+
+        # Eq (24) 2 * E[ W diag(lambda(b_t)) W^\trans ]
+        J_rec = 2 * anp.einsum('ik, tk, kj -> tij', E_W, self.lambda_bs, E_W.T)
+
+        # Eq (25)
+        h_rec = anp.zeros((self.T, self.D_latent))
+        h_rec[:-1] += E_z[1:].dot(E_W.T)
+        h_rec[:-1] += -1 * (0.5 - 2 * self.a[:,None] * self.lambda_bs).dot(E_W.T)
+        h_rec[:-1] += -2 * (E_z[:-1].dot(E_logpi) * self.lambda_bs).dot(E_W.T)
+        h_rec[:-1] += -(0.5 - 2 * self.a[:,None] * self.lambda_bs).dot(E_W.T)
+
+        return J_rec, h_rec
+
+    @property
+    def expected_info_emission_params(self):
+        """
+        Fold in the recurrent potentials
+        """
+        J_node, h_node, log_Z_node = \
+            super(_NonconjugateRecurrentSLDSStatesMeanField, self).\
+                expected_info_emission_params
+
+        J_rec, h_rec = self.expected_info_rec_params
+        return J_node + J_rec, h_node + h_rec
+
+    ### Updates for q(z)
+    @property
+    def mf_trans_matrix(self):
+        """
+        Eq (31).  need exp { E[ \log \pi(\theta) ]}
+        :return:
+        """
+        return self.trans_distn.exp_expected_log_pi
+
+    @property
+    def mf_aBl(self):
+        aBl = super(_NonconjugateRecurrentSLDSStatesMeanField, self).mf_aBl
+
+        # Add in node potentials from transitions
+        aBl += self._mf_aBl_rec
+        return aBl
+
+    @property
+    def _mf_aBl_rec(self):
+        # Compute the extra node *log* potentials from the transition model
+        aBl = anp.zeros((self.T, self.num_states))
+
+        # Eq (34): \psi_{t+1}^{rec} = E [ x_t^\trans W(\theta) ]
+        E_x = self.smoothed_mus
+        E_W = self.trans_distn.expected_W
+        aBl[1:] += E_x[:-1].dot(E_W)
+
+        # Eq (36) transpose:
+        #   -2 E[ x_t W \diag(\lambda(b_t) \log \pi^\trans ]
+        E_logpi = self.trans_distn.expected_logpi
+        a, bs = self.a, self.bs
+        aBl[:-1] += -2 * (E_x[:-1].dot(E_W) * self.lambda_bs).dot(E_logpi.T)
+
+        # Eq (37) transpose:
+        #   (1/2 - 2 a_t \lambda(b_t)^\trans E[ \log \pi^\trans]
+        aBl[:-1] += -1 * (0.5 - 2*a[:,None] * self.lambda_bs).dot(E_logpi.T)
+
+        # Eq (38)
+        import warnings
+        warnings.warn("Eq (38) is not implemented correctly.  "
+                      "Needs E[log pi log pi^T] and traces.  "
+                      "It will still work with point estimates of log pi")
+
+        # TODO: Double check the last transpose!
+        aBl[:-1] += -1 * anp.einsum('ik, tk, ki -> ti', E_logpi, self.lambda_bs, E_logpi.T)
+
+        return aBl
+
+    ### Updates for auxiliary variables of JJ96 bound (a and bs)
+    def meanfield_update_discrete_auxiliary_vars(self, n_iter=10):
+        """
+        Update a and bs via block coordinate updates
+        """
+        K = self.num_states
+        E_z = self.expected_states
+        E_x = self.smoothed_mus
+        E_logpi = self.trans_distn.expected_logpi
+        E_W = self.trans_distn.expected_W
+        lambda_bs = self.lambda_bs
+        m = E_z[:-1].dot(E_logpi) + E_x[:-1].dot(E_W)
+
+        # TODO Compute s_{tk} = E[v_{tk}^2]
+
+        for itr in range(n_iter):
+            # Eq (42)
+            self.a = (m * lambda_bs).sum(axis=1) + K / 2.0 - 1.0
+            self.a /= lambda_bs.sum(axis=1)
+
+            # Eq (43)
+            self.bs = anp.sqrt(s - 2 * m * self.a[:,None] + self.a[:,None]**2)
+
+    def meanfieldupdate(self, niter=1):
+        niter = self.niter if hasattr(self, 'niter') else niter
+        for itr in range(niter):
+            self.meanfield_update_discrete_states()
+            self.meanfield_update_gaussian_states()
+            self.meanfield_update_discrete_auxiliary_vars()
+
+        self._mf_aBl = None
+
+
+class NonconjugateRecurrentSLDSStates(_NonconjugateRecurrentSLDSStatesGibbs,
+                                      _NonconjugateRecurrentSLDSStatesMeanField):
+    pass
 
 
 class SoftmaxRecurrentSLDS(RecurrentSLDS):
