@@ -181,7 +181,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         return aBl
 
     ### Updates for auxiliary variables of JJ96 bound (a and bs)
-    def meanfield_update_discrete_auxiliary_vars(self, n_iter=10):
+    def meanfield_update_auxiliary_vars(self, n_iter=10):
         """
         Update a and bs via block coordinate updates
         """
@@ -208,7 +208,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         for itr in range(niter):
             self.meanfield_update_discrete_states()
             self.meanfield_update_gaussian_states()
-            self.meanfield_update_discrete_auxiliary_vars()
+            self.meanfield_update_auxiliary_vars()
 
         self._mf_aBl = None
 
