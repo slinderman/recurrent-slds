@@ -171,16 +171,31 @@ class SoftmaxInputHMMTransitions(object):
           This would let us seamlessly handle the "input-only" model.
     """
     def __init__(self, num_states, covariate_dim,
-                 mu_W=0.0, sigmasq_W=1.0):
+                 mu_W=0.0, sigmasq_W=1.0,
+                 logpi=None, W=None):
         self.num_states = num_states
         self.covariate_dim = covariate_dim
 
-        self.logpi = anp.zeros((num_states, num_states))
-        self.W = anp.zeros((covariate_dim, num_states))
+        if logpi is not None:
+            assert logpi.shape == (num_states, num_states)
+            self.logpi = logpi
+        else:
+            self.logpi = anp.zeros((num_states, num_states))
+
+        if W is not None:
+            assert W.shape == (covariate_dim, num_states)
+            self.W = W
+        else:
+            self.W = anp.zeros((covariate_dim, num_states))
 
         # Assume diagonal prior on vec(W)
         self.mu_W = mu_W * anp.ones((covariate_dim, num_states))
         self.sigmasq_W = sigmasq_W * anp.ones((covariate_dim, num_states))
+
+        # HMC params
+        self.step_sz = 0.01
+        self.accept_rate = 0.9
+        self.target_accept_rate = 0.9
 
     def get_log_trans_matrices(self, X):
         """
@@ -197,9 +212,9 @@ class SoftmaxInputHMMTransitions(object):
         psi = psi_X[:, None, :] + self.logpi
 
         # apply softmax and normalize over outputs
-        log_pis = psi - amisc.logsumexp(psi, axis=2, keepdims=True)
+        log_trans_matrices = psi - amisc.logsumexp(psi, axis=2, keepdims=True)
 
-        return log_pis
+        return log_trans_matrices
 
     def get_trans_matrices(self, X):
         """
@@ -208,8 +223,8 @@ class SoftmaxInputHMMTransitions(object):
         :param X: inputs/covariates
         :return: stack of transition matrices A[t] \in Kin x Kout
         """
-        log_pis = self.get_log_trans_matrices(X)
-        return anp.exp(log_pis)
+        log_trans_matrices = self.get_log_trans_matrices(X)
+        return anp.exp(log_trans_matrices)
 
     def joint_log_probability(self, logpi, W, stateseqs, covseqs):
         K, D = self.num_states, self.covariate_dim
@@ -233,9 +248,8 @@ class SoftmaxInputHMMTransitions(object):
         return ll
 
     def resample(self, stateseqs=None, covseqs=None,
-                 n_steps=10, step_sz=0.01, **kwargs):
+                 n_steps=10, **kwargs):
         K, D = self.num_states, self.covariate_dim
-        T_total = sum([x.shape[0] for x in covseqs])
 
         # Run HMC
         from hips.inference.hmc import hmc
@@ -244,13 +258,16 @@ class SoftmaxInputHMMTransitions(object):
             K, D = self.num_states, self.covariate_dim
             logpi = params[:K ** 2].reshape((K, K))
             W = params[K ** 2:].reshape((D, K))
-            return self.joint_log_probability(logpi, W, stateseqs, covseqs) / T_total
+            return self.joint_log_probability(logpi, W, stateseqs, covseqs)
 
         grad_hmc_objective = grad(hmc_objective)
         x0 = anp.concatenate((anp.ravel(self.logpi), anp.ravel(self.W)))
-        xf = hmc(hmc_objective, grad_hmc_objective,
-                 step_sz=step_sz, n_steps=n_steps, q_curr=x0,
-                 negative_log_prob=False)
+        xf, self.step_sz, self.accept_rate = \
+            hmc(hmc_objective, grad_hmc_objective,
+                step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
+                negative_log_prob=False,
+                adaptive_step_sz=True,
+                avg_accept_rate=self.accept_rate)
 
         self.logpi = xf[:K**2].reshape((K, K))
         self.W = xf[K**2:].reshape((D, K))
@@ -258,35 +275,28 @@ class SoftmaxInputHMMTransitions(object):
 
 class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
     """
-    Like above but with logpi=0
+    Like above but with logpi constant for all rows (prev states)
     """
-    def _joint_log_probability(self, params, stateseqs, covseqs):
-        K, D = self.num_states, self.covariate_dim
 
-        # Unpack params
-        assert params.size == K * D
-        assert params.ndim == 1
-        W = params.reshape((D, K))
+    def __init__(self, num_states, covariate_dim,
+                 mu_W=0.0, sigmasq_W=1.0,
+                 b=None, W=None):
+        super(SoftmaxInputOnlyHMMTransitions, self).\
+            __init__(num_states, covariate_dim,
+                     mu_W=mu_W, sigmasq_W=sigmasq_W, W=W)
 
-        # Compute the objective
-        ll = 0
-        T_total = 0
-        for z, x in zip(stateseqs, covseqs):
-            T = z.size
-            assert x.ndim == 2 and x.shape[0] == T - 1
-            z_next = one_hot(z[1:], K)
+        if b is not None:
+            assert b.shape == (num_states,)
+            self.b = b
 
-            # Numerator
-            tmp = anp.dot(x, W)
-            ll += anp.sum(tmp * z_next)
+    @property
+    def b(self):
+        return self.logpi[0]
 
-            # Denominator
-            Z = amisc.logsumexp(tmp, axis=1)
-            ll -= anp.sum(Z)
-
-            T_total += (T-1)
-
-        return ll / T_total
+    @b.setter
+    def b(self, value):
+        assert value.shape == (self.num_states,)
+        self.logpi = anp.tile(value[None,:], (self.num_states, 1))
 
     def resample(self, stateseqs=None, covseqs=None,
                  n_steps=10, step_sz=0.01, **kwargs):
@@ -294,14 +304,28 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
 
         # Run HMC
         from hips.inference.hmc import hmc
-        hmc_objective = lambda params: self._joint_log_probability(params, stateseqs, covseqs)
-        grad_hmc_objective = grad(hmc_objective)
-        x0 = anp.ravel(self.W)
-        xf = hmc(hmc_objective, grad_hmc_objective,
-                 step_sz=step_sz, n_steps=n_steps, q_curr=x0,
-                 negative_log_prob=False)
 
-        self.W = xf.reshape((D, K))
+        def hmc_objective(params):
+            # Unpack params
+            assert params.size == K + K * D
+            assert params.ndim == 1
+            b = params[:K]
+            logpi = anp.tile(b[None, :], (K, 1))
+            W = params[K:].reshape((D, K))
+            return self.joint_log_probability(logpi, W, stateseqs, covseqs)
+
+        # hmc_objective = lambda params: self.joint_log_probability(params, stateseqs, covseqs)
+        grad_hmc_objective = grad(hmc_objective)
+        x0 = anp.concatenate((self.b, anp.ravel(self.W)))
+        xf, self.step_sz, self.accept_rate = \
+            hmc(hmc_objective, grad_hmc_objective,
+                step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
+                negative_log_prob=False,
+                adaptive_step_sz=True,
+                avg_accept_rate=self.accept_rate)
+
+        self.b = xf[:K]
+        self.W = xf[K:].reshape((D, K))
 
 
 

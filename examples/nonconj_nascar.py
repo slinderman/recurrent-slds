@@ -32,6 +32,7 @@ from pybasicbayes.distributions import \
 from pyhsmm.util.general import relabel_by_permutation
 from autoregressive.models import ARWeakLimitStickyHDPHMM
 from pyslds.util import get_empirical_ar_params
+from pylds.util import random_rotation
 
 from pinkybrain.models import MixedEmissionHMMSLDS
 from rslds.rslds import RecurrentSLDS
@@ -429,14 +430,14 @@ def plot_z_samples(zs, zref=None,
 @cached("simulated_data")
 def simulate_nascar():
     assert K_true == 4
-    def random_rotation(n, theta):
-        rot = np.array([[np.cos(theta), -np.sin(theta)],
-                        [np.sin(theta), np.cos(theta)]])
-        out = np.zeros((n,n))
-        out[:2,:2] = rot
-        q = np.linalg.qr(np.random.randn(n,n))[0]
-        # q = np.eye(n)
-        return q.dot(out).dot(q.T)
+    # def random_rotation(n, theta):
+    #     rot = np.array([[np.cos(theta), -np.sin(theta)],
+    #                     [np.sin(theta), np.cos(theta)]])
+    #     out = np.zeros((n,n))
+    #     out[:2,:2] = rot
+    #     q = np.linalg.qr(np.random.randn(n,n))[0]
+    #     # q = np.eye(n)
+    #     return q.dot(out).dot(q.T)
 
     As = [random_rotation(D_latent, np.pi/24.),
           random_rotation(D_latent, np.pi/48.)]
@@ -454,22 +455,23 @@ def simulate_nascar():
     As.append(np.eye(D_latent))
     bs.append(np.array([-0.05, 0.]))
 
-    # Construct multinomial regression to divvy up the space #
+    # Construct multinomial regression to divvy up the space
     w1, b1 = np.array([+1.0, 0.0]), np.array([-2.0])   # x + b > 0 -> x > -b
     w2, b2 = np.array([-1.0, 0.0]), np.array([-2.0])   # -x + b > 0 -> x < b
     w3, b3 = np.array([0.0, +1.0]), np.array([0.0])    # y > 0
+    w4, b4 = np.array([0.0, -1.0]), np.array([0.0])    # y < 0
 
-    reg_W = np.row_stack((w1, w2, w3))
-    reg_b = np.row_stack((b1, b2, b3))
+    reg_W = np.column_stack((100*w1, 100*w2, 10*w3,10*w4))
+    reg_b = np.concatenate((100*b1, 100*b2, 10*b3, 10*b4))
 
     # Scale the weights to make the transition boundary sharper
-    reg_scale = 100.
-    reg_b *= reg_scale
-    reg_W *= reg_scale
+    # reg_scale = 100.
+    # reg_b *= reg_scale
+    # reg_W *= reg_scale
 
-    # Account for stick breaking asymmetry
-    mu_b, _ = compute_psi_cmoments(np.ones(K_true))
-    reg_b += mu_b[:,None]
+    # # Account for stick breaking asymmetry
+    # mu_b, _ = compute_psi_cmoments(np.ones(K_true))
+    # reg_b += mu_b[:,None]
 
     # Make a recurrent SLDS with these params #
     dynamics_distns = [
@@ -489,16 +491,14 @@ def simulate_nascar():
             sigma=1e-3 * np.eye(D_latent))
         for _ in range(K)]
 
-    # C = np.hstack((np.eye(D_latent), np.zeros((D_obs, 1))))
     C = np.hstack((npr.randn(D_obs, D_latent), np.zeros((D_obs, 1))))
     emission_distns = \
         DiagonalRegression(D_obs, D_latent+1,
                            A=C, sigmasq=1e-5 *np.ones(D_obs),
                            alpha_0=2.0, beta_0=2.0)
 
-    model = RecurrentSLDS(
-        trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
-                          sigmasq_A=100., sigmasq_b=100.),
+    model = SoftmaxRecurrentOnlySLDS(
+        trans_params=dict(W=reg_W, b=reg_b),
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
@@ -518,8 +518,8 @@ def simulate_nascar():
 
     # Print the true parameters
     np.set_printoptions(precision=2)
-    print("True W_markov:\n{}".format(model.trans_distn.A[:,:K_true]))
-    print("True W_input:\n{}".format(model.trans_distn.A[:,K_true:]))
+    print("True W:\n{}".format(model.trans_distn.W))
+    print("True logpi:\n{}".format(model.trans_distn.logpi))
 
     return model, inputs, z, x, y, mask
 
@@ -616,7 +616,7 @@ def make_rslds_parameters(C_init):
             nu_0=D_latent + 2,
             S_0=1e-4 * np.eye(D_latent),
             M_0=np.hstack((np.eye(D_latent), np.zeros((D_latent, 1)))),
-            K_0=np.eye(D_latent + 1),
+            K_0=1e-4 * np.eye(D_latent + 1),
         )
         for _ in range(K)]
 
@@ -669,7 +669,7 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
 
 @cached("rslds")
 def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
-              N_iters=10000):
+              true_model=None, N_iters=10000):
     print("Fitting rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -682,17 +682,25 @@ def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
         fixed_emission=False,
         alpha=3.)
 
-    rslds.add_data(y, inputs=inputs, mask=mask)
-
-    # Initialize states
-    rslds.states_list[0].stateseq = z_init.copy()
-    rslds.states_list[0].gaussian_states = x_init.copy()
+    rslds.add_data(y, inputs=inputs, mask=mask,
+                   stateseq=z_init.copy(),
+                   gaussian_states=x_init.copy())
 
     # Initialize dynamics
-    print("Initializing dynamics with Gibbs sampling")
+    # print("Initializing dynamics with Gibbs sampling")
     for _ in progprint_xrange(100):
         rslds.resample_dynamics_distns()
         rslds.resample_trans_distn()
+        rslds.resample_emission_distns()
+
+    # if true_model is not None:
+    #     rslds.trans_distn.W = true_model.trans_distn.W.copy()
+    #     rslds.trans_distn.b = true_model.trans_distn.b.copy()
+    #     for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
+    #         rdd.A = tdd.A.copy()
+    #         rdd.sigma = tdd.sigma.copy()
+    #     rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
+    #     rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
 
     # Fit the model
     lps = []
@@ -718,41 +726,34 @@ if __name__ == "__main__":
     # plot_most_likely_dynamics(true_model.trans_distn,
     #                           true_model.dynamics_distns,
     #                           figsize=(3,1.5))
-    #
-    # plot_all_dynamics(true_model.dynamics_distns,
-    #                   filename="true_dynamics.png")
+
+    # plot_all_dynamics(true_model.dynamics_distns)
+
+    # plt.show()
+    # import sys; sys.exit()
+
 
     ## Run PCA to get 2D dynamics
     x_init, C_init = fit_factor_analysis(y, mask=mask)
 
     ## Fit an ARHMM for initialization
-    #  TODO: This is still a bit ugly...
-    #  basically, we're only fitting on data that was observed
-    good_inds = np.all(mask, axis=1)
-    good_x_init = x_init[good_inds]
-    arhmm, good_z_init = fit_arhmm(good_x_init)
-    z_init = np.random.randint(0,K,size=T)
-    z_init[good_inds] = good_z_init
-    z_init[mask_start:mask_stop] = z_init[mask_start-1]
-
-    # Test: Zero out missing data
-    x_init[~good_inds] = 0
-
+    arhmm, z_init = fit_arhmm(x_init)
     # plot_trajectory_and_probs(
     #     z_init[1:], x_init[1:],
-    #     title="Sticky ARHMM",
-    #     filename="sticky_arhmm.png")
-    #
+    #     title="Sticky ARHMM")
+    # plt.show()
+
     # plot_all_dynamics(arhmm.obs_distns,
     #                   filename="sticky_arhmm_dynamics.png")
 
     ## Fit a standard SLDS
     slds, slds_lps, slds_z_smpls, slds_x = \
-        fit_slds(inputs, z_init, x_init, y, mask, C_init, N_iters=N_iters)
+        fit_slds(inputs, z_init, x_init, y, mask, C_init, N_iters=1000)
 
     ## Fit a recurrent SLDS
     rslds, rslds_lps, rslds_z_smpls, rslds_x = \
-        fit_rslds(inputs, z_init, x_init, y, mask, C_init, N_iters=100)
+        fit_rslds(inputs, z_init, x_init, y, mask, C_init,
+                  true_model=true_model, N_iters=1000)
 
     # plot_trajectory_and_probs(
     #     rslds_z_smpls[-1][1:], rslds_x[1:],
@@ -760,7 +761,7 @@ if __name__ == "__main__":
     #     title="Recurrent SLDS",
     #     filename="rslds.png")
     #
-    plot_all_dynamics(rslds.dynamics_distns)
+    # plot_all_dynamics(rslds.dynamics_distns)
     #
     # plot_z_samples(rslds_z_smpls,
     #                plt_slice=(0,1000),

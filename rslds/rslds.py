@@ -22,17 +22,17 @@ class RecurrentSLDSStates(_SLDSStatesCountData,
     Effectively, the multinomial emissions from the discrete states
     as observations for the continuous states.
     """
-    def __init__(self, model, covariates=None, data=None, mask=None, fixed_stateseq=None, **kwargs):
+    def __init__(self, model, covariates=None, data=None, mask=None, **kwargs):
+
         # By definition, the covariates are the latent gaussian states
         if covariates is not None:
             raise NotImplementedError("Not supporting exogenous inputs yet")
 
         super(RecurrentSLDSStates, self).\
-            __init__(model, data=data, mask=mask,
-                     fixed_stateseq=fixed_stateseq, **kwargs)
+            __init__(model, data=data, mask=mask, **kwargs)
 
         # Override the Gaussian states with random noise
-        self.gaussian_states = np.random.randn(self.T, self.D_latent)
+        # self.gaussian_states = np.random.randn(self.T, self.D_latent)
 
         # Set the covariates to be the gaussian states
         self.covariates = self.gaussian_states[:-1].copy()

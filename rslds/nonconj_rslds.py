@@ -14,6 +14,14 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
 
     This class will do HMC.
     """
+
+    def __init__(self, model, **kwargs):
+        super(NonconjugateRecurrentSLDSStates, self).__init__(model, **kwargs)
+
+        # HMC params
+        self.step_sz = 1e-5
+        self.accept_rate = 0.90
+
     @property
     def info_trans_params(self):
         """
@@ -53,17 +61,24 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
 
         return ll
 
-    def resample_gaussian_states(self, step_sz=0.01, n_steps=10):
+    def resample_gaussian_states(self, step_sz=0.001, n_steps=10):
         # Run HMC
         from hips.inference.hmc import hmc
-        nll = lambda x: \
-            -1 * self.joint_log_probability(
-                anp.reshape(x, (self.T, self.D_latent))) / self.T
+        hmc_objective = lambda x: \
+            self.joint_log_probability(anp.reshape(x, (self.T, self.D_latent)))
 
-        dnll = grad(nll)
+        grad_hmc_objective = grad(hmc_objective)
         x0 = self.gaussian_states.ravel()
-        xf = hmc(nll, dnll, step_sz=step_sz, n_steps=n_steps, q_curr=x0)
+        xf, self.step_sz, self.accept_rate = \
+            hmc(hmc_objective, grad_hmc_objective,
+                step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
+                negative_log_prob=False,
+                adaptive_step_sz=True,
+                avg_accept_rate=self.accept_rate,
+                min_step_sz=1e-5)
+
         self.gaussian_states = xf.reshape((self.T, self.D_latent))
+        self.covariates = self.gaussian_states[:-1].copy()
 
     def resample_transition_auxiliary_variables(self):
         pass
