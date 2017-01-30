@@ -161,6 +161,8 @@ class StickyInputOnlyARHMM(InputARHMM):
 class SoftmaxInputARHMM(InputARHMM):
     _trans_class = SoftmaxInputHMMTransitions
 
+class SoftmaxInputOnlyARHMM(InputARHMM):
+    _trans_class = SoftmaxInputOnlyHMMTransitions
 
 ### Recurrent ARHMM's
 class RecurrentARHMM(InputARHMM):
@@ -211,7 +213,7 @@ class RecurrentARHMM(InputARHMM):
         return data, dss
 
 
-class InputOnlyRecurrentARHMM(RecurrentARHMM):
+class RecurrentOnlyARHMM(RecurrentARHMM):
     _trans_class = InputOnlyHMMTransitions
 
 class StickyInputOnlyRecurrentARHMM(RecurrentARHMM):
@@ -219,3 +221,6 @@ class StickyInputOnlyRecurrentARHMM(RecurrentARHMM):
 
 class SoftmaxRecurrentARHMM(RecurrentARHMM):
     _trans_class = SoftmaxInputHMMTransitions
+
+class SoftmaxRecurrentOnlyARHMM(RecurrentARHMM):
+    _trans_class = SoftmaxInputOnlyHMMTransitions

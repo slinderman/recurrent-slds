@@ -1,9 +1,10 @@
-from pyslds.states import _SLDSStatesMaskedData
+from rslds.rslds import RecurrentSLDS, RecurrentSLDSStates
+from rslds.transitions import SoftmaxInputHMMTransitions, SoftmaxInputOnlyHMMTransitions
 
 import autograd.numpy as anp
 from autograd import grad
 
-class NonconjugateRecurrentSLDSStates(_SLDSStatesMaskedData):
+class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
     """
     When the transition model is not amenable to PG augmentation, we
     need an alternative approach.  Many methods could apply:
@@ -13,40 +14,78 @@ class NonconjugateRecurrentSLDSStates(_SLDSStatesMaskedData):
 
     This class will do HMC.
     """
+    @property
+    def info_trans_params(self):
+        """
+        The non conjugate model doesn't have simple potentials
+        """
+        return anp.zeros((self.D_latent, self.D_latent)), \
+               anp.zeros((self.D_latent,))
+
     def joint_log_probability(self, x):
         # A differentiable function to compute the joint probability for a given
         # latent state sequence
-        # TODO: Vectorize?
-        z, y, T = self.stateseq, self.data, self.T
         ll = 0
 
         # Initial likelihood
-        mu_init, sigma_init = self.mu_init, self.sigma_init
-        ll += -0.5 * anp.dot(x[0] - mu_init, anp.linalg.solve(sigma_init, x[0] - mu_init))
+        J_init, h_init, _ = self.info_init_params
+        ll += -0.5 * anp.einsum('i,ij,j->', x[0], J_init, x[0])
+        # ll += anp.einsum('i,i->', x[0], h_init)
+        ll += anp.sum(x[0] * h_init)
 
         # Continuous transition potentials
-        As, Bs, Qs = self.As, self.Bs, self.sigma_statess
-        for t in range(self.T-1):
-            xpred = anp.dot(x[t], As[t].T) + anp.dot(self.inputs[t], Bs[t].T)
-            ll += -0.5 * anp.dot(x[t+1] - xpred, anp.linalg.solve(Qs[t], x[t+1] - xpred))
+        J_pair_11, J_pair_21, J_pair_22, h_pair_1, h_pair_2, _ = self.info_dynamics_params
+        x_prev, x_next = x[:-1], x[1:]
+        ll += -0.5 * anp.einsum('ti,tij,tj->', x_prev, J_pair_11[:-1], x_prev)
+        ll += -1.0 * anp.einsum('ti,tij,tj->', x_next, J_pair_21[:-1], x_prev)
+        ll += -0.5 * anp.einsum('ti,tij,tj->', x_next, J_pair_22[:-1], x_next)
+        # ll += anp.einsum('ti,ti->', x_prev, h_pair_1[:-1])
+        # ll += anp.einsum('ti,ti->', x_next, h_pair_2[:-1])
+        ll += anp.sum(x_prev * h_pair_1[:-1])
+        ll += anp.sum(x_next * h_pair_2[:-1])
 
         # Discrete transition probabilities
-        log_pis = self.model.trans_distn.get_log_trans_matrices(x)
-        ll += anp.sum(log_pis[:, z[:-1], z[1:]])
+        trans_distn = self.trans_distn
+        ll += trans_distn.joint_log_probability(
+            trans_distn.logpi, trans_distn.W, [self.stateseq], [x[:-1]])
 
         # Observation likelihoods
-        Cs, Ds, Rs = self.Cs, self.Ds, self.sigma_obss
-        for t in range(self.T):
-            ypred = anp.dot(x[t], Cs[t].T) + anp.dot(self.inputs[t], Ds[t].T)
-            ll += -0.5 * anp.dot(y[t] - ypred, anp.linalg.solve(Rs[t], y[t] - ypred))
+        J_node, h_node, _ = self.info_emission_params
+        ll += -0.5 * anp.einsum('ti,tij,tj->', x, J_node, x)
+        # ll += anp.einsum('ti,ti->', x, h_node)
+        ll += anp.sum(x * h_node)
 
-        return ll / T
+        return ll
 
     def resample_gaussian_states(self, step_sz=0.01, n_steps=10):
         # Run HMC
         from hips.inference.hmc import hmc
-        nll = lambda x: -1 * self.joint_log_probability(anp.reshape(x, (self.T, self.D_latent)))
+        nll = lambda x: \
+            -1 * self.joint_log_probability(
+                anp.reshape(x, (self.T, self.D_latent))) / self.T
+
+
         dnll = grad(nll)
         x0 = self.gaussian_states.ravel()
         xf = hmc(nll, dnll, step_sz=step_sz, n_steps=n_steps, q_curr=x0)
         self.gaussian_states = xf.reshape((self.T, self.D_latent))
+
+    def resample_transition_auxiliary_variables(self):
+        pass
+
+
+class SoftmaxRecurrentSLDS(RecurrentSLDS):
+    _states_class = NonconjugateRecurrentSLDSStates
+    _trans_class = SoftmaxInputHMMTransitions
+
+    def resample_trans_distn(self):
+        # Include the auxiliary variables used for state resampling
+        self.trans_distn.resample(
+            stateseqs=[s.stateseq for s in self.states_list],
+            covseqs=[s.covariates for s in self.states_list],
+        )
+        self._clear_caches()
+
+
+class SoftmaxRecurrentOnlySLDS(SoftmaxRecurrentSLDS):
+    _trans_class = SoftmaxInputOnlyHMMTransitions
