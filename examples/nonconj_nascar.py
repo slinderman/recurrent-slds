@@ -496,7 +496,6 @@ def simulate_nascar():
                            A=C, sigmasq=1e-5 *np.ones(D_obs),
                            alpha_0=2.0, beta_0=2.0)
 
-
     model = RecurrentSLDS(
         trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
                           sigmasq_A=100., sigmasq_b=100.),

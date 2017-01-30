@@ -30,7 +30,6 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
         # Initial likelihood
         J_init, h_init, _ = self.info_init_params
         ll += -0.5 * anp.einsum('i,ij,j->', x[0], J_init, x[0])
-        # ll += anp.einsum('i,i->', x[0], h_init)
         ll += anp.sum(x[0] * h_init)
 
         # Continuous transition potentials
@@ -39,8 +38,6 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
         ll += -0.5 * anp.einsum('ti,tij,tj->', x_prev, J_pair_11[:-1], x_prev)
         ll += -1.0 * anp.einsum('ti,tij,tj->', x_next, J_pair_21[:-1], x_prev)
         ll += -0.5 * anp.einsum('ti,tij,tj->', x_next, J_pair_22[:-1], x_next)
-        # ll += anp.einsum('ti,ti->', x_prev, h_pair_1[:-1])
-        # ll += anp.einsum('ti,ti->', x_next, h_pair_2[:-1])
         ll += anp.sum(x_prev * h_pair_1[:-1])
         ll += anp.sum(x_next * h_pair_2[:-1])
 
@@ -52,7 +49,6 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
         # Observation likelihoods
         J_node, h_node, _ = self.info_emission_params
         ll += -0.5 * anp.einsum('ti,tij,tj->', x, J_node, x)
-        # ll += anp.einsum('ti,ti->', x, h_node)
         ll += anp.sum(x * h_node)
 
         return ll
@@ -63,7 +59,6 @@ class NonconjugateRecurrentSLDSStates(RecurrentSLDSStates):
         nll = lambda x: \
             -1 * self.joint_log_probability(
                 anp.reshape(x, (self.T, self.D_latent))) / self.T
-
 
         dnll = grad(nll)
         x0 = self.gaussian_states.ravel()
