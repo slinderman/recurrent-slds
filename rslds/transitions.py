@@ -288,6 +288,13 @@ class SoftmaxInputHMMTransitions(object):
         self.logpi = xf[:K**2].reshape((K, K))
         self.W = xf[K**2:].reshape((D, K))
 
+    def meanfieldupdate(self):
+        """
+        We're going to need access to the log joints...
+        :return:
+        """
+        raise NotImplementedError
+
 
 class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
     """

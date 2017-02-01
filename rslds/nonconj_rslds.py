@@ -92,7 +92,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
     def __init__(self, model, **kwargs):
         super(_NonconjugateRecurrentSLDSStatesMeanField, self).__init__(model, **kwargs)
         self.a = anp.zeros((self.T-1,))
-        self.bs = anp.zeros((self.T-1, self.num_states))
+        self.bs = anp.ones((self.T-1, self.num_states))
 
     @property
     def lambda_bs(self):
@@ -188,12 +188,41 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         K = self.num_states
         E_z = self.expected_states
         E_x = self.smoothed_mus
+        E_xxT = self.smoothed_sigmas + E_x[:,:,None] * E_x[:,None,:]
         E_logpi = self.trans_distn.expected_logpi
         E_W = self.trans_distn.expected_W
         lambda_bs = self.lambda_bs
         m = E_z[:-1].dot(E_logpi) + E_x[:-1].dot(E_W)
 
-        # TODO Compute s_{tk} = E[v_{tk}^2]
+        # Compute s_{tk} = E[v_{tk}^2]
+        import warnings
+        warnings.warn("Eq (43) is not implemented correctly.  "
+                      "Needs second moments of W.  "
+                      "It will still work with point estimates W")
+        E_logpi_sq = E_logpi ** 2
+        E_WWT = anp.array([anp.outer(wk) for wk in E_W.T])
+
+        # E[v_{tk}^2] = e_k^T E[\psi_1 + \psi_2 + \psi_3] e_k  where
+        # \psi_1 = Tr(E[z_t z_t^T p_k p_k^T])               with p_k = P[:,k]  (kth col of trans matrix)
+        #        = Tr(diag(E[z_t]) \dot E[p_k p_k^T] )
+        #        = Tr(A^T \dot B)                           with A = A^T = diag(E[z_t]), B = E[p_k p_k^T]
+        #        = \sum_{ij} A_{ij} * B_{ij}
+        #        = \sum_{i} E[z_{t,i}] * E[p_{ik}^2]
+        psi_1 = E_z[:-1].dot(E_logpi_sq)
+
+        # \psi_{2,k} = 2e_k^T E[W^T x_t z_t^T log pi] e_k
+        # \psi_2     = 2 diag*(E[W^T x_t z_t^T log pi])
+        #            = 2 E[(x_t^T W) * (z_t^T log pi)]
+        psi_2 = 2 * E_x[:-1].dot(E_W) * E_z[:-1].dot(E_logpi)
+
+        # \psi_3 = Tr(E[x_t x_t^T w_k w_k^T])               with w_k = W[:,k]  (kth col of weight matrix)
+        #        = Tr(E[x_t x_t^T] \dot E[w_k w_k^T])
+        #        = Tr(A^T \dot B)                           with A = A^T = E[x_t x_t^T]), B = E[w_k w_k^T]
+        #        = \sum_{ij} A_{ij} * B_{ij}
+        psi_3 = anp.einsum('tij, kij -> tij', E_xxT[:-1] * E_WWT)
+
+        # s_{tk} = E[v_{tk}^2]
+        s = psi_1 + psi_2 + psi_3
 
         for itr in range(n_iter):
             # Eq (42)
