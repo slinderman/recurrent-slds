@@ -188,6 +188,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         """
         K = self.num_states
         E_z = self.expected_states
+        E_z /= E_z.sum(1, keepdims=True)
         E_x = self.smoothed_mus
         E_xxT = self.smoothed_sigmas + E_x[:,:,None] * E_x[:,None,:]
         E_logpi = self.trans_distn.expected_logpi
@@ -265,6 +266,10 @@ class SoftmaxRecurrentSLDS(RecurrentSLDS):
             covseqs=[s.covariates for s in self.states_list],
         )
         self._clear_caches()
+
+    def meanfield_update_trans_distn(self):
+        # Include the auxiliar variables of the lower bound
+        pass
 
 
 class SoftmaxRecurrentOnlySLDS(SoftmaxRecurrentSLDS):

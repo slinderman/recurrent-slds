@@ -88,7 +88,8 @@ def make_figure(true_model, z_true, x_true, y,
      - ARHMM synthesis
      - rSLDS synthesis
     """
-    fig = plt.figure(figsize=(6.5,3.5))
+    # fig = plt.figure(figsize=(6.5,3.5))
+    fig = plt.figure(figsize=(13,7))
     gs = gridspec.GridSpec(2,3)
 
     fp = FontProperties()
@@ -619,7 +620,7 @@ def make_rslds_parameters(C_init):
             nu_0=D_latent + 2,
             S_0=1e-4 * np.eye(D_latent),
             M_0=np.hstack((np.eye(D_latent), np.zeros((D_latent, 1)))),
-            K_0=1e-4 * np.eye(D_latent + 1),
+            K_0=np.eye(D_latent + 1),
         )
         for _ in range(K)]
 
@@ -724,7 +725,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
 
 # @cached("rslds_variational")
 def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
-              true_model=None, N_iters=10000):
+              true_model=None, N_gibbs=10, N_iters=10000):
     print("Fitting rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -737,44 +738,34 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
         fixed_emission=False,
         alpha=3.)
 
+    # Set the prior precision for the dynamics params
+    rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
+
     rslds.add_data(y, inputs=inputs, mask=mask,
                    stateseq=z_init.copy(),
                    gaussian_states=x_init.copy())
 
-    # Initialize dynamics
-    # print("Initializing dynamics with Gibbs sampling")
-    # for _ in progprint_xrange(10):
-    #     rslds.resample_dynamics_distns()
-    #     rslds.resample_trans_distn()
-    #     rslds.resample_emission_distns()
-
-    if true_model is not None:
-        rslds.trans_distn.W = true_model.trans_distn.W.copy()
-        rslds.trans_distn.b = true_model.trans_distn.b.copy()
-        for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
-            rdd.A = tdd.A.copy()
-            rdd.sigma = tdd.sigma.copy()
-        rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
-        rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
-        rslds.emission_distns[0].J_0 = 1e3 * np.eye(D_latent+1)
-
-    # Initialize
+    # if true_model is not None:
+    #     rslds.trans_distn.W = true_model.trans_distn.W.copy()
+    #     rslds.trans_distn.b = true_model.trans_distn.b.copy()
+    #     for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
+    #         rdd.A = tdd.A.copy()
+    #         rdd.sigma = tdd.sigma.copy()
+    #     rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
+    #     rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
+    #     rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent+1)
     # rslds.resample_states()
 
-    # for _ in progprint_xrange(10):
-    #     rslds.resample_model()
+    print("Initializing dynamics with Gibbs sampling")
+    for _ in progprint_xrange(N_gibbs):
+        rslds.resample_model()
     rslds._init_mf_from_gibbs()
 
     # Fit the model
     vlbs = []
-    z_smpls = []
+    z_smpls = [np.argmax(rslds.states_list[0].expected_states, axis=1)]
     for _ in progprint_xrange(N_iters):
-        # rslds.meanfield_coordinate_descent_step(compute_vlb=False)
-        # rslds.states_list[0].meanfield_update_discrete_states()
-        rslds.states_list[0].meanfield_update_gaussian_states()
-        rslds.states_list[0].meanfield_update_auxiliary_vars()
-
-        # vlbs.append(rslds.states_list[0].get_vlb(most_recently_updated=True))
+        vlbs.append(rslds.meanfield_coordinate_descent_step(compute_vlb=True))
         z_smpls.append(np.argmax(rslds.states_list[0].expected_states, axis=1))
 
     x_smpl = rslds.states_list[0].smoothed_mus
@@ -824,7 +815,7 @@ if __name__ == "__main__":
     #               true_model=true_model, N_iters=1000)
 
     rslds, rslds_lps, rslds_z_smpls, rslds_x = \
-        fit_rslds_variational(inputs, z_true, x_true, y, mask, C_init,
+        fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
                   true_model=true_model, N_iters=100)
 
 
@@ -850,7 +841,6 @@ if __name__ == "__main__":
 
     make_figure(true_model, z_true, x_true, y,
                 rslds, rslds_z_smpls, rslds_x,
-                # rslds, slds_z_smpls, slds_x,
                 rslds_z_gen, rslds_x_gen, rslds_y_gen,
                 slds, slds_z_smpls, slds_x,
                 slds_z_gen, slds_x_gen, slds_y_gen,
