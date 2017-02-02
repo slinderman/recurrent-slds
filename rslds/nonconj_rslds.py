@@ -109,7 +109,8 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         E_logpi = self.trans_distn.expected_logpi
 
         # Eq (24) 2 * E[ W diag(lambda(b_t)) W^\trans ]
-        J_rec = 2 * anp.einsum('ik, tk, kj -> tij', E_W, self.lambda_bs, E_W.T)
+        J_rec = anp.zeros((self.T, self.D_latent, self.D_latent))
+        anp.einsum('ik, tk, kj -> tij', 2 * E_W, self.lambda_bs, E_W.T, out=J_rec[:-1])
 
         # Eq (25)
         h_rec = anp.zeros((self.T, self.D_latent))
@@ -130,7 +131,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
                 expected_info_emission_params
 
         J_rec, h_rec = self.expected_info_rec_params
-        return J_node + J_rec, h_node + h_rec
+        return J_node + J_rec, h_node + h_rec, log_Z_node
 
     ### Updates for q(z)
     @property
@@ -139,7 +140,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         Eq (31).  need exp { E[ \log \pi(\theta) ]}
         :return:
         """
-        return self.trans_distn.exp_expected_log_pi
+        return self.trans_distn.exp_expected_logpi
 
     @property
     def mf_aBl(self):
@@ -191,7 +192,8 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         E_xxT = self.smoothed_sigmas + E_x[:,:,None] * E_x[:,None,:]
         E_logpi = self.trans_distn.expected_logpi
         E_W = self.trans_distn.expected_W
-        lambda_bs = self.lambda_bs
+
+        # Compute m_{tk} = E[v_{tk}]
         m = E_z[:-1].dot(E_logpi) + E_x[:-1].dot(E_W)
 
         # Compute s_{tk} = E[v_{tk}^2]
@@ -200,34 +202,40 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
                       "Needs second moments of W.  "
                       "It will still work with point estimates W")
         E_logpi_sq = E_logpi ** 2
-        E_WWT = anp.array([anp.outer(wk) for wk in E_W.T])
+        E_WWT = anp.array([anp.outer(E_W[:,k], E_W[:,k]) for k in range(K)])
 
         # E[v_{tk}^2] = e_k^T E[\psi_1 + \psi_2 + \psi_3] e_k  where
-        # \psi_1 = Tr(E[z_t z_t^T p_k p_k^T])               with p_k = P[:,k]  (kth col of trans matrix)
+        # e_k^T \psi_1 e_k =
+        #        = Tr(E[z_t z_t^T p_k p_k^T])               with p_k = P[:,k]  (kth col of trans matrix)
         #        = Tr(diag(E[z_t]) \dot E[p_k p_k^T] )
         #        = Tr(A^T \dot B)                           with A = A^T = diag(E[z_t]), B = E[p_k p_k^T]
         #        = \sum_{ij} A_{ij} * B_{ij}
         #        = \sum_{i} E[z_{t,i}] * E[p_{ik}^2]
         psi_1 = E_z[:-1].dot(E_logpi_sq)
 
-        # \psi_{2,k} = 2e_k^T E[W^T x_t z_t^T log pi] e_k
+        # e_k^T \psi_2 e_k =
+        #            = 2e_k^T E[W^T x_t z_t^T log pi] e_k
         # \psi_2     = 2 diag*(E[W^T x_t z_t^T log pi])
         #            = 2 E[(x_t^T W) * (z_t^T log pi)]
         psi_2 = 2 * E_x[:-1].dot(E_W) * E_z[:-1].dot(E_logpi)
 
-        # \psi_3 = Tr(E[x_t x_t^T w_k w_k^T])               with w_k = W[:,k]  (kth col of weight matrix)
+        # e_k^T \psi_3 e_k =
+        #        =Tr(E[x_t x_t^T w_k w_k^T])               with w_k = W[:,k]  (kth col of weight matrix)
         #        = Tr(E[x_t x_t^T] \dot E[w_k w_k^T])
         #        = Tr(A^T \dot B)                           with A = A^T = E[x_t x_t^T]), B = E[w_k w_k^T]
         #        = \sum_{ij} A_{ij} * B_{ij}
-        psi_3 = anp.einsum('tij, kij -> tij', E_xxT[:-1] * E_WWT)
+        psi_3 = anp.einsum('tij, kij -> tk', E_xxT[:-1], E_WWT)
 
         # s_{tk} = E[v_{tk}^2]
         s = psi_1 + psi_2 + psi_3
+        assert anp.all(s > 0)
 
         for itr in range(n_iter):
+            lambda_bs = self.lambda_bs
+
             # Eq (42)
-            self.a = (m * lambda_bs).sum(axis=1) + K / 2.0 - 1.0
-            self.a /= lambda_bs.sum(axis=1)
+            self.a = 2 * (m * lambda_bs).sum(axis=1) + K / 2.0 - 1.0
+            self.a /= 2 * lambda_bs.sum(axis=1)
 
             # Eq (43)
             self.bs = anp.sqrt(s - 2 * m * self.a[:,None] + self.a[:,None]**2)

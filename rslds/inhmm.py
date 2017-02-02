@@ -2,7 +2,7 @@ import numpy as np
 from pybasicbayes.util.stats import sample_discrete
 from pyhsmm.internals import initial_state
 from pyhsmm.internals.hmm_states import HMMStatesEigen
-from pyhsmm.models import _HMMGibbsSampling
+from pyhsmm.models import _HMMGibbsSampling, _HMMMeanField
 from rslds.transitions import InputHMMTransitions, InputOnlyHMMTransitions, \
     StickyInputOnlyHMMTransitions, SoftmaxInputHMMTransitions, SoftmaxInputOnlyHMMTransitions
 
@@ -119,8 +119,15 @@ class _InputHMMMixin(object):
         )
         self._clear_caches()
 
+    ### Mean Field
+    def meanfield_update_trans_distn(self):
+        # self.trans_distn.meanfieldupdate(
+        #     [s.expected_transcounts for s in self.states_list])
+        # self._clear_caches()
+        # TODO: Update to take in sufficient statistics of x and z
+        pass
 
-class InputHMM(_InputHMMMixin, _HMMGibbsSampling):
+class InputHMM(_InputHMMMixin, _HMMGibbsSampling, _HMMMeanField):
     _trans_class = InputHMMTransitions
     _states_class = InputHMMStates
 

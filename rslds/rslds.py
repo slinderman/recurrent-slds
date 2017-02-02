@@ -1,7 +1,7 @@
 import numpy as np
 
 from pyslds.states import _SLDSStatesCountData, _SLDSStatesMaskedData
-from pyslds.models import _SLDSGibbsMixin
+from pyslds.models import _SLDSGibbsMixin, _SLDSMeanFieldMixin
 
 import pypolyagamma as ppg
 
@@ -144,8 +144,7 @@ class RecurrentSLDSStates(_SLDSStatesCountData,
         ppg.pgdrawvpar(self.ppgs, b_pg.ravel(), psi.ravel(), self.trans_omegas.ravel())
         assert not np.allclose(omega0, self.trans_omegas)
 
-
-class RecurrentSLDS(_SLDSGibbsMixin, InputHMM):
+class RecurrentSLDS(_SLDSGibbsMixin, _SLDSMeanFieldMixin, InputHMM):
 
     _states_class = RecurrentSLDSStates
     _trans_class = InputHMMTransitions
@@ -195,6 +194,12 @@ class RecurrentSLDS(_SLDSGibbsMixin, InputHMM):
         if self.fixed_emission:
             return
         super(RecurrentSLDS, self).resample_emission_distns()
+
+
+    ### Mean Field
+    def meanfield_update_trans_distn(self):
+        # TODO: Update with the auxiliary variables from states
+        pass
 
 
 class StickyRecurrentSLDS(RecurrentSLDS):

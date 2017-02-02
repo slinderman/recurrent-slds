@@ -513,8 +513,11 @@ def simulate_nascar():
     y = ys
 
     # Maks off some data
-    mask = np.ones((T,D_obs), dtype=bool)
-    mask[mask_start:mask_stop] = False
+    if mask_start == mask_stop:
+        mask = None
+    else:
+        mask = np.ones((T,D_obs), dtype=bool)
+        mask[mask_start:mask_stop] = False
 
     # Print the true parameters
     np.set_printoptions(precision=2)
@@ -605,7 +608,7 @@ def make_rslds_parameters(C_init):
     init_dynamics_distns = [
         Gaussian(
             mu=np.zeros(D_latent),
-            sigma=np.eye(D_latent),
+            sigma=3*np.eye(D_latent),
             nu_0=D_latent + 2, sigma_0=3. * np.eye(D_latent),
             mu_0=np.zeros(D_latent), kappa_0=1.0,
         )
@@ -719,6 +722,72 @@ def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
 
     return rslds, lps, z_smpls, x_test
 
+# @cached("rslds_variational")
+def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
+              true_model=None, N_iters=10000):
+    print("Fitting rSLDS")
+    init_dynamics_distns, dynamics_distns, emission_distns = \
+        make_rslds_parameters(C_init)
+
+    rslds = SoftmaxRecurrentOnlySLDS(
+        init_state_distn='uniform',
+        init_dynamics_distns=init_dynamics_distns,
+        dynamics_distns=dynamics_distns,
+        emission_distns=emission_distns,
+        fixed_emission=False,
+        alpha=3.)
+
+    rslds.add_data(y, inputs=inputs, mask=mask,
+                   stateseq=z_init.copy(),
+                   gaussian_states=x_init.copy())
+
+    # Initialize dynamics
+    # print("Initializing dynamics with Gibbs sampling")
+    # for _ in progprint_xrange(10):
+    #     rslds.resample_dynamics_distns()
+    #     rslds.resample_trans_distn()
+    #     rslds.resample_emission_distns()
+
+    if true_model is not None:
+        rslds.trans_distn.W = true_model.trans_distn.W.copy()
+        rslds.trans_distn.b = true_model.trans_distn.b.copy()
+        for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
+            rdd.A = tdd.A.copy()
+            rdd.sigma = tdd.sigma.copy()
+        rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
+        rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
+        rslds.emission_distns[0].J_0 = 1e3 * np.eye(D_latent+1)
+
+    # Initialize
+    # rslds.resample_states()
+
+    # for _ in progprint_xrange(10):
+    #     rslds.resample_model()
+    rslds._init_mf_from_gibbs()
+
+    # Fit the model
+    vlbs = []
+    z_smpls = []
+    # import ipdb; ipdb.set_trace()
+    for _ in progprint_xrange(N_iters):
+        # rslds.meanfield_coordinate_descent_step(compute_vlb=False)
+        rslds.states_list[0].meanfield_update_discrete_states()
+        rslds.states_list[0].meanfield_update_gaussian_states()
+        rslds.states_list[0].meanfield_update_auxiliary_vars()
+
+        # vlbs.append(rslds.states_list[0].get_vlb(most_recently_updated=True))
+        z_smpls.append(np.argmax(rslds.states_list[0].expected_states, axis=1))
+
+    x_smpl = rslds.states_list[0].smoothed_mus
+    z_smpls = np.array(z_smpls)
+    vlbs = np.array(vlbs)
+
+    print("Inf W_markov:\n{}".format(rslds.trans_distn.logpi))
+    print("Inf W_input:\n{}".format(rslds.trans_distn.W))
+
+    return rslds, vlbs, z_smpls, x_smpl
+
+
 if __name__ == "__main__":
     ## Simulate NASCAR data
     true_model, inputs, z_true, x_true, y, mask = simulate_nascar()
@@ -751,9 +820,14 @@ if __name__ == "__main__":
         fit_slds(inputs, z_init, x_init, y, mask, C_init, N_iters=1000)
 
     ## Fit a recurrent SLDS
+    # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
+    #     fit_rslds(inputs, z_init, x_init, y, mask, C_init,
+    #               true_model=true_model, N_iters=1000)
+
     rslds, rslds_lps, rslds_z_smpls, rslds_x = \
-        fit_rslds(inputs, z_init, x_init, y, mask, C_init,
-                  true_model=true_model, N_iters=1000)
+        fit_rslds_variational(inputs, z_true, x_true, y, mask, C_init,
+                  true_model=true_model, N_iters=100)
+
 
     # plot_trajectory_and_probs(
     #     rslds_z_smpls[-1][1:], rslds_x[1:],
@@ -777,6 +851,7 @@ if __name__ == "__main__":
 
     make_figure(true_model, z_true, x_true, y,
                 rslds, rslds_z_smpls, rslds_x,
+                # rslds, slds_z_smpls, slds_x,
                 rslds_z_gen, rslds_x_gen, rslds_y_gen,
                 slds, slds_z_smpls, slds_x,
                 slds_z_gen, slds_x_gen, slds_y_gen,
