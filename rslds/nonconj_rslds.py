@@ -229,7 +229,6 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         # s_{tk} = E[v_{tk}^2]
         s = psi_1 + psi_2 + psi_3
         assert anp.all(s > 0)
-
         for itr in range(n_iter):
             lambda_bs = self.lambda_bs
 

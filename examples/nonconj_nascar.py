@@ -768,10 +768,9 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
     # Fit the model
     vlbs = []
     z_smpls = []
-    # import ipdb; ipdb.set_trace()
     for _ in progprint_xrange(N_iters):
         # rslds.meanfield_coordinate_descent_step(compute_vlb=False)
-        rslds.states_list[0].meanfield_update_discrete_states()
+        # rslds.states_list[0].meanfield_update_discrete_states()
         rslds.states_list[0].meanfield_update_gaussian_states()
         rslds.states_list[0].meanfield_update_auxiliary_vars()
 
