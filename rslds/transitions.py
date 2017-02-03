@@ -357,7 +357,7 @@ class SoftmaxInputHMMTransitions(object):
         return 0
 
     def _initialize_mean_field(self):
-        self.mf_J = np.array([self.J_0.copy() for _ in range(self.D_out)])
+        self.mf_J = np.array([1e2 * self.J_0.copy() for _ in range(self.D_out)])
         # Initializing with mean zero is pathological. Break symmetry by starting with sampled A.
         # self.mf_h_A = np.array([self.h_0.copy() for _ in range(D_out)])
         A = np.hstack((self.logpi, self.W.T))

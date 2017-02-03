@@ -745,20 +745,27 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
                    stateseq=z_init.copy(),
                    gaussian_states=x_init.copy())
 
-    # if true_model is not None:
-    #     rslds.trans_distn.W = true_model.trans_distn.W.copy()
-    #     rslds.trans_distn.b = true_model.trans_distn.b.copy()
-    #     for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
-    #         rdd.A = tdd.A.copy()
-    #         rdd.sigma = tdd.sigma.copy()
-    #     rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
-    #     rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
-    #     rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent+1)
-    # rslds.resample_states()
+    if true_model is not None:
+        print("Initializing dynamics with Gibbs sampling")
+        rslds.trans_distn.W = true_model.trans_distn.W.copy()
+        rslds.trans_distn.b = true_model.trans_distn.b.copy()
+        rslds.trans_distn._initialize_mean_field()
 
-    print("Initializing dynamics with Gibbs sampling")
-    for _ in progprint_xrange(N_gibbs):
-        rslds.resample_model()
+        for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
+            rdd.A = tdd.A.copy()
+            rdd.sigma = tdd.sigma.copy()
+
+        rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
+        rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
+        rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent+1)
+
+        rslds.states_list[0].stateseq = true_model.states_list[0].stateseq.copy()
+        rslds.states_list[0].gaussian_states = true_model.states_list[0].gaussian_states.copy()
+    else:
+        print("Initializing dynamics with Gibbs sampling")
+        for _ in progprint_xrange(N_gibbs):
+            rslds.resample_model()
+
     rslds._init_mf_from_gibbs()
 
     # Fit the model

@@ -1,9 +1,13 @@
+from warnings import warn
+
 from rslds.rslds import RecurrentSLDS, RecurrentSLDSStates
 from rslds.transitions import SoftmaxInputHMMTransitions, SoftmaxInputOnlyHMMTransitions
 from rslds.util import logistic
 
+import numpy as np
+import scipy.misc as scmisc
+
 import autograd.numpy as anp
-import autograd.scipy.misc as amisc
 from autograd import grad
 
 class _NonconjugateRecurrentSLDSStatesGibbs(RecurrentSLDSStates):
@@ -29,8 +33,8 @@ class _NonconjugateRecurrentSLDSStatesGibbs(RecurrentSLDSStates):
         """
         The non conjugate model doesn't have simple potentials
         """
-        return anp.zeros((self.D_latent, self.D_latent)), \
-               anp.zeros((self.D_latent,))
+        return np.zeros((self.D_latent, self.D_latent)), \
+               np.zeros((self.D_latent,))
 
     def joint_log_probability(self, x):
         # A differentiable function to compute the joint probability for a given
@@ -92,8 +96,8 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
     """
     def __init__(self, model, **kwargs):
         super(_NonconjugateRecurrentSLDSStatesMeanField, self).__init__(model, **kwargs)
-        self.a = anp.zeros((self.T-1,))
-        self.bs = anp.ones((self.T-1, self.num_states))
+        self.a = np.zeros((self.T - 1,))
+        self.bs = np.ones((self.T - 1, self.num_states))
 
     @property
     def lambda_bs(self):
@@ -107,18 +111,22 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         """
         E_z = self.expected_states
         E_W = self.trans_distn.expected_W
+        E_WWT = self.trans_distn.expected_WWT
         E_logpi = self.trans_distn.expected_logpi
+        E_logpi_WT = self.trans_distn.expected_logpi_WT
+
 
         # Eq (24) 2 * E[ W diag(lambda(b_t)) W^\trans ]
-        J_rec = anp.zeros((self.T, self.D_latent, self.D_latent))
-        anp.einsum('ik, tk, kj -> tij', 2 * E_W, self.lambda_bs, E_W.T, out=J_rec[:-1])
+        J_rec = np.zeros((self.T, self.D_latent, self.D_latent))
+        np.einsum('ik, tk, kj -> tij', 2 * E_W, self.lambda_bs, E_W.T, out=J_rec[:-1])
+        # np.einsum('tk, kij -> tij', 2 * self.lambda_bs, E_WWT, out=J_rec[:-1])
 
         # Eq (25)
-        h_rec = anp.zeros((self.T, self.D_latent))
+        h_rec = np.zeros((self.T, self.D_latent))
         h_rec[:-1] += E_z[1:].dot(E_W.T)
         h_rec[:-1] += -1 * (0.5 - 2 * self.a[:,None] * self.lambda_bs).dot(E_W.T)
         h_rec[:-1] += -2 * (E_z[:-1].dot(E_logpi) * self.lambda_bs).dot(E_W.T)
-        h_rec[:-1] += -(0.5 - 2 * self.a[:,None] * self.lambda_bs).dot(E_W.T)
+        # h_rec[:-1] += -2 * np.einsum('ti, tj, jid -> td', E_z[:-1], self.lambda_bs, E_logpi_WT)
 
         return J_rec, h_rec
 
@@ -132,6 +140,9 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
                 expected_info_emission_params
 
         J_rec, h_rec = self.expected_info_rec_params
+
+        # warn("Dropping rec potentials")
+        # return J_node , h_node, log_Z_node
         return J_node + J_rec, h_node + h_rec, log_Z_node
 
     ### Updates for q(z)
@@ -154,7 +165,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
     @property
     def _mf_aBl_rec(self):
         # Compute the extra node *log* potentials from the transition model
-        aBl = anp.zeros((self.T, self.num_states))
+        aBl = np.zeros((self.T, self.num_states))
 
         # Eq (34): \psi_{t+1}^{rec} = E [ x_t^\trans W(\theta) ]
         E_x = self.smoothed_mus
@@ -178,7 +189,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
                       "It will still work with point estimates of log pi")
 
         # TODO: Double check the last transpose!
-        aBl[:-1] += -1 * anp.einsum('ik, tk, ki -> ti', E_logpi, self.lambda_bs, E_logpi.T)
+        aBl[:-1] += -1 * np.einsum('ik, tk, ki -> ti', E_logpi, self.lambda_bs, E_logpi.T)
 
         return aBl
 
@@ -204,7 +215,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
                       "Needs second moments of W.  "
                       "It will still work with point estimates W")
         E_logpi_sq = E_logpi ** 2
-        E_WWT = anp.array([anp.outer(E_W[:,k], E_W[:,k]) for k in range(K)])
+        E_WWT = np.array([np.outer(E_W[:, k], E_W[:, k]) for k in range(K)])
 
         # E[v_{tk}^2] = e_k^T E[\psi_1 + \psi_2 + \psi_3] e_k  where
         # e_k^T \psi_1 e_k =
@@ -226,11 +237,11 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         #        = Tr(E[x_t x_t^T] \dot E[w_k w_k^T])
         #        = Tr(A^T \dot B)                           with A = A^T = E[x_t x_t^T]), B = E[w_k w_k^T]
         #        = \sum_{ij} A_{ij} * B_{ij}
-        psi_3 = anp.einsum('tij, kij -> tk', E_xxT[:-1], E_WWT)
+        psi_3 = np.einsum('tij, kij -> tk', E_xxT[:-1], E_WWT)
 
         # s_{tk} = E[v_{tk}^2]
         s = psi_1 + psi_2 + psi_3
-        assert anp.all(s > 0)
+        assert np.all(s > 0)
         for itr in range(n_iter):
             lambda_bs = self.lambda_bs
 
@@ -239,7 +250,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
             self.a /= 2 * lambda_bs.sum(axis=1)
 
             # Eq (43)
-            self.bs = anp.sqrt(s - 2 * m * self.a[:,None] + self.a[:,None]**2)
+            self.bs = np.sqrt(s - 2 * m * self.a[:, None] + self.a[:, None] ** 2)
 
     def meanfield_update_discrete_states(self):
         """
@@ -257,20 +268,20 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         # Convert messages into expectations
         expected_states = alphal + betal
         expected_states -= expected_states.max(1)[:, None]
-        anp.exp(expected_states, out=expected_states)
+        np.exp(expected_states, out=expected_states)
         expected_states /= expected_states.sum(1)[:, None]
 
-        Al = anp.log(trans_potential)
+        Al = np.log(trans_potential)
         log_joints = alphal[:-1, :, None] \
                      + (betal[1:, None, :] \
                      + likelihood_potential[1:, None, :]) \
                      + Al[None, ...]
         log_joints -= log_joints.max(axis=(1, 2), keepdims=True)
-        joints = anp.exp(log_joints)
+        joints = np.exp(log_joints)
         joints /= joints.sum(axis=(1, 2), keepdims=True)
 
         # Compute the log normalizer log p(x_{1:T} | \theta, a, b)
-        normalizer = amisc.logsumexp(alphal[0] + betal[0])
+        normalizer = scmisc.logsumexp(alphal[0] + betal[0])
 
         # Save expected statistics
         self.expected_states = expected_states
@@ -283,7 +294,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
 
         # And then there's this snapshot thing... yikes mattjj!
         self._mf_param_snapshot = \
-            (anp.log(trans_potential), anp.log(init_potential),
+            (np.log(trans_potential), np.log(init_potential),
              likelihood_potential, normalizer)
 
     def _set_expected_trans_stats(self):
@@ -300,16 +311,16 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
 
         # Combine to get trans stats
         # E_u = [E[z], E[x]]
-        E_u = anp.concatenate((E_z[:-1], E_x[:-1]), axis=1)
+        E_u = np.concatenate((E_z[:-1], E_x[:-1]), axis=1)
 
         # E_u_zp1T = [ E[z zp1^T],  E[x, zp1^T] ]
         E_x_zp1T = E_x[:-1, :, None] * E_z[1:, None, :]
-        E_u_zp1T = anp.concatenate((E_z_zp1T, E_x_zp1T), axis=1)
+        E_u_zp1T = np.concatenate((E_z_zp1T, E_x_zp1T), axis=1)
 
         # E_uuT = [[ diag(E[z]),  E[z]E[x^T] ]
         #          [ E[x]E[z^T],  E[xxT]     ]]
-        E_u_uT = anp.zeros((T-1, K+D, K+D))
-        E_u_uT[:, anp.arange(K), anp.arange(K)] = E_z[:-1]
+        E_u_uT = np.zeros((T - 1, K + D, K + D))
+        E_u_uT[:, np.arange(K), np.arange(K)] = E_z[:-1]
         E_u_uT[:, :K, K:] = E_z[:-1, :, None] * E_x[:-1, None, :]
         E_u_uT[:, K:, :K] = E_x[:-1, :, None] * E_z[:-1, None, :]
         E_u_uT[:, K:, K:] = E_x_xT[:-1]
@@ -320,6 +331,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
     def meanfieldupdate(self, niter=1):
         niter = self.niter if hasattr(self, 'niter') else niter
         for itr in range(niter):
+            # warn("Skipping discrete state updates")
             self.meanfield_update_discrete_states()
             self.meanfield_update_gaussian_states()
             self.meanfield_update_auxiliary_vars()
@@ -329,6 +341,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
 
     def _init_mf_from_gibbs(self):
         super(_NonconjugateRecurrentSLDSStatesMeanField, self)._init_mf_from_gibbs()
+        self.meanfield_update_auxiliary_vars()
         self.expected_joints = self.expected_states[:-1,:,None] * self.expected_states[1:,None,:]
         self._set_expected_trans_stats()
 
@@ -351,6 +364,9 @@ class SoftmaxRecurrentSLDS(RecurrentSLDS):
         self._clear_caches()
 
     def meanfield_update_trans_distn(self):
+        # warn("Skipping trans distn updates")
+        # return
+
         # Include the auxiliar variables of the lower bound
         sum_tuples = lambda lst: list(map(sum, zip(*lst)))
         self.trans_distn.meanfieldupdate(
@@ -360,6 +376,11 @@ class SoftmaxRecurrentSLDS(RecurrentSLDS):
         super(SoftmaxRecurrentSLDS, self)._init_mf_from_gibbs()
         self.trans_distn._initialize_mean_field()
 
+    def meanfield_update_parameters(self):
+        self.meanfield_update_init_dynamics_distns()
+        self.meanfield_update_dynamics_distns()
+        self.meanfield_update_emission_distns()
+        super(SoftmaxRecurrentSLDS, self).meanfield_update_parameters()
 
 class SoftmaxRecurrentOnlySLDS(SoftmaxRecurrentSLDS):
     _trans_class = SoftmaxInputOnlyHMMTransitions
