@@ -171,48 +171,47 @@ class SoftmaxInputHMMTransitions(object):
           This would let us seamlessly handle the "input-only" model.
     """
     def __init__(self, num_states, covariate_dim,
-                 mu_W=0.0, sigmasq_W=1.0,
+                 mu_0=0.0, Sigma_0=1.0,
                  logpi=None, W=None):
         self.num_states = num_states
         self.covariate_dim = covariate_dim
+        self.D_out = num_states
+        self.D_in = num_states + covariate_dim
 
         if logpi is not None:
             assert logpi.shape == (num_states, num_states)
             self.logpi = logpi
         else:
-            self.logpi = anp.zeros((num_states, num_states))
+            self.logpi = np.zeros((num_states, num_states))
 
         if W is not None:
             assert W.shape == (covariate_dim, num_states)
             self.W = W
         else:
-            self.W = anp.zeros((covariate_dim, num_states))
+            self.W = np.zeros((covariate_dim, num_states))
 
         # Assume diagonal prior on vec(W)
-        self.mu_W = mu_W * anp.ones((covariate_dim, num_states))
-        self.sigmasq_W = sigmasq_W * anp.ones((covariate_dim, num_states))
+        # self.mu_W = mu_W * anp.ones((covariate_dim, num_states))
+        # self.sigmasq_W = sigmasq_W * anp.ones((covariate_dim, num_states))
+
+        mu_0 = np.zeros(self.D_in) if mu_0 is None else mu_0
+        Sigma_0 = np.eye(self.D_in) if Sigma_0 is None else Sigma_0
+        assert mu_0.shape == (self.D_in,)
+        assert Sigma_0.shape == (self.D_in, self.D_in)
+        self.h_0 = np.linalg.solve(Sigma_0, mu_0)
+        self.J_0 = np.linalg.inv(Sigma_0)
 
         # HMC params
         self.step_sz = 0.01
         self.accept_rate = 0.9
         self.target_accept_rate = 0.9
 
-    ### Mean field
-    #   TODO: Implement variational factors for W and logpi
-    @property
-    def expected_W(self):
-        return self.W
+        # Mean field natural parameters
+        self.mf_J = np.array([self.J_0.copy() for _ in range(self.D_out)])
+        self.mf_h = np.array([self.h_0.copy() for Jd in self.mf_J])
+        self._mf_Sigma = self._mf_mu = self._mf_mumuT = None
 
-    @property
-    def expected_logpi(self):
-        return self.logpi
-
-    @property
-    def exp_expected_logpi(self):
-        P = anp.exp(self.logpi)
-        P /= anp.sum(P, axis=1, keepdims=True)
-        return P
-
+    ### HMC
     def get_log_trans_matrices(self, X):
         """
         Get log transition matrices as a function of X
@@ -221,7 +220,7 @@ class SoftmaxInputHMMTransitions(object):
         :return: stack of transition matrices log A[t] \in Kin x Kout
         """
         # compute the contribution of the covariate to transition matrix
-        psi_X = anp.dot(X, self.W)
+        psi_X = np.dot(X, self.W)
 
         # add the (T x Kout) and (Kin x Kout) matrices together such that they
         # broadcast into a (T x Kin x Kout) stack of matrices
@@ -240,7 +239,7 @@ class SoftmaxInputHMMTransitions(object):
         :return: stack of transition matrices A[t] \in Kin x Kout
         """
         log_trans_matrices = self.get_log_trans_matrices(X)
-        return anp.exp(log_trans_matrices)
+        return np.exp(log_trans_matrices)
 
     def joint_log_probability(self, logpi, W, stateseqs, covseqs):
         K, D = self.num_states, self.covariate_dim
@@ -277,7 +276,7 @@ class SoftmaxInputHMMTransitions(object):
             return self.joint_log_probability(logpi, W, stateseqs, covseqs)
 
         grad_hmc_objective = grad(hmc_objective)
-        x0 = anp.concatenate((anp.ravel(self.logpi), anp.ravel(self.W)))
+        x0 = np.concatenate((np.ravel(self.logpi), np.ravel(self.W)))
         xf, self.step_sz, self.accept_rate = \
             hmc(hmc_objective, grad_hmc_objective,
                 step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
@@ -288,15 +287,82 @@ class SoftmaxInputHMMTransitions(object):
         self.logpi = xf[:K**2].reshape((K, K))
         self.W = xf[K**2:].reshape((D, K))
 
-    def meanfieldupdate(self, E_x, E_z, E_zzp1T):
+    ### Mean field
+    @property
+    def expected_W(self):
+        # _mf_mu = [E[logpi],  E[W]]
+        return self._mf_mu[:, self.num_states:].T
+
+    @property
+    def expected_logpi(self):
+        # _mf_mu = [E[logpi],  E[W]]
+        return self._mf_mu[:, :self.num_states]
+
+    @property
+    def exp_expected_logpi(self):
+        P = np.exp(self.expected_logpi)
+        P /= np.sum(P, axis=1, keepdims=True)
+        return P
+
+    @property
+    def expected_WWT(self):
+        return self._mf_mumuT[:,self.num_states:, self.num_states:]
+
+    @property
+    def expected_logpi_WT(self):
+        return self._mf_mumuT[:, :self.num_states, self.num_states:]
+
+    @property
+    def expected_logpi_logpiT(self):
+        return self._mf_mumuT[:, :self.num_states, :self.num_states]
+
+    def meanfieldupdate(self, stats, prob=1.0, stepsize=1.0):
         """
-        We're going to need access to the log joints...
-        :return:
+        Update the expected transition matrix with a bunch of stats
+        :param stats: E_zp1_uT, E_uuT, E_u, a, lambda_bs from the states model
+        :param prob: minibatch probability
+        :param stepsize: svi step size
         """
-        raise NotImplementedError
+        E_u_zp1T, E_uuT, E_u, a, lambda_bs = stats
+
+        update_param = lambda oldv, newv, stepsize: \
+            oldv * (1 - stepsize) + newv * stepsize
+
+        # Update statistics each row of A
+        for k in range(self.D_out):
+            # Jk = self.J_0 + 2 * lambda_bs[:,k][:,None,None] * E_uuT
+            Jk = self.J_0 + 2 * np.einsum('t, tij -> ij', lambda_bs[:, k], E_uuT) / prob
+            hk = self.h_0 + E_u_zp1T[:, :, k].sum(0) / prob
+            hk -= np.einsum('t, ti -> i', (0.5 - 2 * lambda_bs[:, k] * a), E_u) / prob
+
+            # Update the mean field natural parameters
+            self.mf_J[k] = update_param(self.mf_J[k], Jk, stepsize)
+            self.mf_h[k] = update_param(self.mf_h[k], hk, stepsize)
+
+        self._set_standard_expectations()
+
+        # Update log pi and W with meanfield expectations
+        self.logpi = self.expected_logpi
+        self.W = self.expected_W
+
+    def _set_standard_expectations(self):
+        # Compute expectations
+        self._mf_Sigma = np.array([np.linalg.inv(Jk) for Jk in self.mf_J])
+        self._mf_mu = np.array([np.dot(Sk, hk) for Sk, hk in zip(self._mf_Sigma, self.mf_h)])
+        self._mf_mumuT = np.array([Sd + np.outer(md, md)
+                                   for Sd, md in zip(self._mf_Sigma, self._mf_mu)])
 
     def get_vlb(self):
+        # TODO
         return 0
+
+    def _initialize_mean_field(self):
+        self.mf_J = np.array([self.J_0.copy() for _ in range(self.D_out)])
+        # Initializing with mean zero is pathological. Break symmetry by starting with sampled A.
+        # self.mf_h_A = np.array([self.h_0.copy() for _ in range(D_out)])
+        A = np.hstack((self.logpi, self.W.T))
+        self.mf_h = np.array([Jd.dot(Ad) for Jd, Ad in zip(self.mf_J, A)])
+        self._set_standard_expectations()
 
 
 class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
@@ -305,11 +371,11 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
     """
 
     def __init__(self, num_states, covariate_dim,
-                 mu_W=0.0, sigmasq_W=1.0,
+                 mu_0=None, Sigma_0=None,
                  b=None, W=None):
         super(SoftmaxInputOnlyHMMTransitions, self).\
             __init__(num_states, covariate_dim,
-                     mu_W=mu_W, sigmasq_W=sigmasq_W, W=W)
+                     mu_0=mu_0, Sigma_0=Sigma_0, W=W)
 
         if b is not None:
             assert b.shape == (num_states,)
@@ -322,7 +388,7 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
     @b.setter
     def b(self, value):
         assert value.shape == (self.num_states,)
-        self.logpi = anp.tile(value[None,:], (self.num_states, 1))
+        self.logpi = np.tile(value[None, :], (self.num_states, 1))
 
     def resample(self, stateseqs=None, covseqs=None,
                  n_steps=10, step_sz=0.01, **kwargs):
@@ -342,7 +408,7 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
 
         # hmc_objective = lambda params: self.joint_log_probability(params, stateseqs, covseqs)
         grad_hmc_objective = grad(hmc_objective)
-        x0 = anp.concatenate((self.b, anp.ravel(self.W)))
+        x0 = np.concatenate((self.b, np.ravel(self.W)))
         xf, self.step_sz, self.accept_rate = \
             hmc(hmc_objective, grad_hmc_objective,
                 step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
@@ -353,5 +419,9 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
         self.b = xf[:K]
         self.W = xf[K:].reshape((D, K))
 
-
-
+    # def meanfieldupdate(self, stats, prob=1.0, stepsize=1.0):
+    #     """
+    #     TODO: Update with the constraint that all rows of logpi are the same!
+    #     :return:
+    #     """
+    #     pass

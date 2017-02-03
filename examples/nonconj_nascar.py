@@ -159,8 +159,8 @@ def make_figure(true_model, z_true, x_true, y,
 
 
     plt.tight_layout()
-    # plt.savefig(os.path.join(results_dir, "nascar.png"), dpi=200)
-    # plt.savefig(os.path.join(results_dir, "nascar.pdf"))
+    plt.savefig(os.path.join(results_dir, "nascar.png"), dpi=200)
+    plt.savefig(os.path.join(results_dir, "nascar.pdf"))
     plt.show()
 
 

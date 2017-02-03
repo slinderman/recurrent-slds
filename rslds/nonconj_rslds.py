@@ -3,6 +3,7 @@ from rslds.transitions import SoftmaxInputHMMTransitions, SoftmaxInputOnlyHMMTra
 from rslds.util import logistic
 
 import autograd.numpy as anp
+import autograd.scipy.misc as amisc
 from autograd import grad
 
 class _NonconjugateRecurrentSLDSStatesGibbs(RecurrentSLDSStates):
@@ -240,14 +241,96 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
             # Eq (43)
             self.bs = anp.sqrt(s - 2 * m * self.a[:,None] + self.a[:,None]**2)
 
+    def meanfield_update_discrete_states(self):
+        """
+        Override the discrete state updates in pyhsmm to keep the necessary suff stats.
+        """
+        self.clear_caches()
+
+        # Run the message passing algorithm
+        trans_potential = self.mf_trans_matrix
+        init_potential = self.mf_pi_0
+        likelihood_potential = self.mf_aBl
+        alphal = self._messages_forwards_log(trans_potential, init_potential, likelihood_potential)
+        betal = self._messages_backwards_log(trans_potential, likelihood_potential)
+
+        # Convert messages into expectations
+        expected_states = alphal + betal
+        expected_states -= expected_states.max(1)[:, None]
+        anp.exp(expected_states, out=expected_states)
+        expected_states /= expected_states.sum(1)[:, None]
+
+        Al = anp.log(trans_potential)
+        log_joints = alphal[:-1, :, None] \
+                     + (betal[1:, None, :] \
+                     + likelihood_potential[1:, None, :]) \
+                     + Al[None, ...]
+        log_joints -= log_joints.max(axis=(1, 2), keepdims=True)
+        joints = anp.exp(log_joints)
+        joints /= joints.sum(axis=(1, 2), keepdims=True)
+
+        # Compute the log normalizer log p(x_{1:T} | \theta, a, b)
+        normalizer = amisc.logsumexp(alphal[0] + betal[0])
+
+        # Save expected statistics
+        self.expected_states = expected_states
+        self.expected_joints = joints
+        self.expected_transcounts = joints.sum(0)
+        self._normalizer = normalizer
+
+        # Update the "stateseq" variable too
+        self.stateseq = self.expected_states.argmax(1).astype('int32')
+
+        # And then there's this snapshot thing... yikes mattjj!
+        self._mf_param_snapshot = \
+            (anp.log(trans_potential), anp.log(init_potential),
+             likelihood_potential, normalizer)
+
+    def _set_expected_trans_stats(self):
+        """
+        Compute the expected stats for updating the transition distn
+        stats = E_u_zp1T, E_uuT, E_u, a, lambda_bs
+        """
+        T, D, K = self.T, self.D_latent, self.num_states
+
+        E_z = self.expected_states
+        E_z_zp1T = self.expected_joints
+        E_x = self.smoothed_mus
+        E_x_xT = self.smoothed_sigmas + E_x[:, :, None] * E_x[:, None, :]
+
+        # Combine to get trans stats
+        # E_u = [E[z], E[x]]
+        E_u = anp.concatenate((E_z[:-1], E_x[:-1]), axis=1)
+
+        # E_u_zp1T = [ E[z zp1^T],  E[x, zp1^T] ]
+        E_x_zp1T = E_x[:-1, :, None] * E_z[1:, None, :]
+        E_u_zp1T = anp.concatenate((E_z_zp1T, E_x_zp1T), axis=1)
+
+        # E_uuT = [[ diag(E[z]),  E[z]E[x^T] ]
+        #          [ E[x]E[z^T],  E[xxT]     ]]
+        E_u_uT = anp.zeros((T-1, K+D, K+D))
+        E_u_uT[:, anp.arange(K), anp.arange(K)] = E_z[:-1]
+        E_u_uT[:, :K, K:] = E_z[:-1, :, None] * E_x[:-1, None, :]
+        E_u_uT[:, K:, :K] = E_x[:-1, :, None] * E_z[:-1, None, :]
+        E_u_uT[:, K:, K:] = E_x_xT[:-1]
+
+        self.E_trans_stats = (E_u_zp1T, E_u_uT, E_u, self.a, self.lambda_bs)
+
+
     def meanfieldupdate(self, niter=1):
         niter = self.niter if hasattr(self, 'niter') else niter
         for itr in range(niter):
             self.meanfield_update_discrete_states()
             self.meanfield_update_gaussian_states()
             self.meanfield_update_auxiliary_vars()
+            self._set_expected_trans_stats()
 
         self._mf_aBl = None
+
+    def _init_mf_from_gibbs(self):
+        super(_NonconjugateRecurrentSLDSStatesMeanField, self)._init_mf_from_gibbs()
+        self.expected_joints = self.expected_states[:-1,:,None] * self.expected_states[1:,None,:]
+        self._set_expected_trans_stats()
 
 
 class NonconjugateRecurrentSLDSStates(_NonconjugateRecurrentSLDSStatesGibbs,
@@ -269,7 +352,13 @@ class SoftmaxRecurrentSLDS(RecurrentSLDS):
 
     def meanfield_update_trans_distn(self):
         # Include the auxiliar variables of the lower bound
-        pass
+        sum_tuples = lambda lst: list(map(sum, zip(*lst)))
+        self.trans_distn.meanfieldupdate(
+            stats=sum_tuples([s.E_trans_stats for s in self.states_list]))
+
+    def _init_mf_from_gibbs(self):
+        super(SoftmaxRecurrentSLDS, self)._init_mf_from_gibbs()
+        self.trans_distn._initialize_mean_field()
 
 
 class SoftmaxRecurrentOnlySLDS(SoftmaxRecurrentSLDS):
