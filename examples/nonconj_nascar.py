@@ -746,7 +746,7 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
                    gaussian_states=x_init.copy())
 
     if true_model is not None:
-        print("Initializing dynamics with Gibbs sampling")
+        print("Initializing dynamics with true model")
         rslds.trans_distn.W = true_model.trans_distn.W.copy()
         rslds.trans_distn.b = true_model.trans_distn.b.copy()
         rslds.trans_distn._initialize_mean_field()
@@ -779,8 +779,13 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
     z_smpls = np.array(z_smpls)
     vlbs = np.array(vlbs)
 
-    print("Inf W_markov:\n{}".format(rslds.trans_distn.logpi))
-    print("Inf W_input:\n{}".format(rslds.trans_distn.W))
+
+    if true_model is not None:
+        print("True logpi:\n{}".format(true_model.trans_distn.logpi))
+        print("True W:\n{}".format(true_model.trans_distn.W))
+
+    print("Inf logpi:\n{}".format(rslds.trans_distn.logpi))
+    print("Inf W:\n{}".format(rslds.trans_distn.W))
 
     return rslds, vlbs, z_smpls, x_smpl
 

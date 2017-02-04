@@ -118,15 +118,15 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
 
         # Eq (24) 2 * E[ W diag(lambda(b_t)) W^\trans ]
         J_rec = np.zeros((self.T, self.D_latent, self.D_latent))
-        np.einsum('ik, tk, kj -> tij', 2 * E_W, self.lambda_bs, E_W.T, out=J_rec[:-1])
-        # np.einsum('tk, kij -> tij', 2 * self.lambda_bs, E_WWT, out=J_rec[:-1])
+        # np.einsum('ik, tk, kj -> tij', 2 * E_W, self.lambda_bs, E_W.T, out=J_rec[:-1])
+        np.einsum('tk, kij -> tij', 2 * self.lambda_bs, E_WWT, out=J_rec[:-1])
 
         # Eq (25)
         h_rec = np.zeros((self.T, self.D_latent))
         h_rec[:-1] += E_z[1:].dot(E_W.T)
         h_rec[:-1] += -1 * (0.5 - 2 * self.a[:,None] * self.lambda_bs).dot(E_W.T)
-        h_rec[:-1] += -2 * (E_z[:-1].dot(E_logpi) * self.lambda_bs).dot(E_W.T)
-        # h_rec[:-1] += -2 * np.einsum('ti, tj, jid -> td', E_z[:-1], self.lambda_bs, E_logpi_WT)
+        # h_rec[:-1] += -2 * (E_z[:-1].dot(E_logpi) * self.lambda_bs).dot(E_W.T)
+        h_rec[:-1] += -2 * np.einsum('ti, tj, jid -> td', E_z[:-1], self.lambda_bs, E_logpi_WT)
 
         return J_rec, h_rec
 
@@ -170,26 +170,27 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         # Eq (34): \psi_{t+1}^{rec} = E [ x_t^\trans W(\theta) ]
         E_x = self.smoothed_mus
         E_W = self.trans_distn.expected_W
+        E_logpi = self.trans_distn.expected_logpi
+        E_logpi_WT = self.trans_distn.expected_logpi_WT
+        E_logpi_logpiT = self.trans_distn.expected_logpi_logpiT
+        E_logpisq = np.array([np.diag(Pk) for Pk in E_logpi_logpiT]).T
+
         aBl[1:] += E_x[:-1].dot(E_W)
 
         # Eq (36) transpose:
         #   -2 E[ x_t W \diag(\lambda(b_t) \log \pi^\trans ]
-        E_logpi = self.trans_distn.expected_logpi
-        a, bs = self.a, self.bs
-        aBl[:-1] += -2 * (E_x[:-1].dot(E_W) * self.lambda_bs).dot(E_logpi.T)
+        # aBl[:-1] += -2 * (E_x[:-1].dot(E_W) * self.lambda_bs).dot(E_logpi.T)
+        aBl[:-1] += -2 * np.einsum('td, kid, tk -> ti', E_x[:-1], E_logpi_WT, self.lambda_bs)
 
         # Eq (37) transpose:
         #   (1/2 - 2 a_t \lambda(b_t)^\trans E[ \log \pi^\trans]
+        a, bs = self.a, self.bs
         aBl[:-1] += -1 * (0.5 - 2*a[:,None] * self.lambda_bs).dot(E_logpi.T)
 
         # Eq (38)
-        import warnings
-        warnings.warn("Eq (38) is not implemented correctly.  "
-                      "Needs E[log pi log pi^T] and traces.  "
-                      "It will still work with point estimates of log pi")
 
-        # TODO: Double check the last transpose!
-        aBl[:-1] += -1 * np.einsum('ik, tk, ki -> ti', E_logpi, self.lambda_bs, E_logpi.T)
+        # aBl[:-1] += -1 * np.einsum('tk, ki -> ti', self.lambda_bs, E_logpi_logpiT_diag)
+        aBl[:-1] += -1 * self.lambda_bs.dot(E_logpisq.T)
 
         return aBl
 
@@ -205,17 +206,20 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         E_xxT = self.smoothed_sigmas + E_x[:,:,None] * E_x[:,None,:]
         E_logpi = self.trans_distn.expected_logpi
         E_W = self.trans_distn.expected_W
+        E_WWT = self.trans_distn.expected_WWT
 
         # Compute m_{tk} = E[v_{tk}]
         m = E_z[:-1].dot(E_logpi) + E_x[:-1].dot(E_W)
 
         # Compute s_{tk} = E[v_{tk}^2]
-        import warnings
-        warnings.warn("Eq (43) is not implemented correctly.  "
-                      "Needs second moments of W.  "
-                      "It will still work with point estimates W")
-        E_logpi_sq = E_logpi ** 2
-        E_WWT = np.array([np.outer(E_W[:, k], E_W[:, k]) for k in range(K)])
+        # import warnings
+        # warnings.warn("Eq (43) is not implemented correctly.  "
+        #               "Needs second moments of W.  "
+        #               "It will still work with point estimates W")
+        # E_logpi_sq = E_logpi ** 2
+        E_logpi_logpiT = self.trans_distn.expected_logpi_logpiT
+        E_logpi_sq = np.array([np.diag(Pk) for Pk in E_logpi_logpiT]).T
+        # E_WWT = np.array([np.outer(E_W[:, k], E_W[:, k]) for k in range(K)])
 
         # E[v_{tk}^2] = e_k^T E[\psi_1 + \psi_2 + \psi_3] e_k  where
         # e_k^T \psi_1 e_k =
@@ -230,7 +234,9 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         #            = 2e_k^T E[W^T x_t z_t^T log pi] e_k
         # \psi_2     = 2 diag*(E[W^T x_t z_t^T log pi])
         #            = 2 E[(x_t^T W) * (z_t^T log pi)]
-        psi_2 = 2 * E_x[:-1].dot(E_W) * E_z[:-1].dot(E_logpi)
+        # psi_2 = 2 * E_x[:-1].dot(E_W) * E_z[:-1].dot(E_logpi)
+        E_logpi_WT = self.trans_distn.expected_logpi_WT
+        psi_2 = 2 * np.einsum('td, ti, kid -> tk', E_x[:-1], E_z[:-1], E_logpi_WT)
 
         # e_k^T \psi_3 e_k =
         #        =Tr(E[x_t x_t^T w_k w_k^T])               with w_k = W[:,k]  (kth col of weight matrix)
@@ -333,6 +339,7 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         for itr in range(niter):
             # warn("Skipping discrete state updates")
             self.meanfield_update_discrete_states()
+            # warn("Skipping continuous state updates")
             self.meanfield_update_gaussian_states()
             self.meanfield_update_auxiliary_vars()
             self._set_expected_trans_stats()
@@ -343,6 +350,9 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         super(_NonconjugateRecurrentSLDSStatesMeanField, self)._init_mf_from_gibbs()
         self.meanfield_update_auxiliary_vars()
         self.expected_joints = self.expected_states[:-1,:,None] * self.expected_states[1:,None,:]
+        self._mf_param_snapshot = \
+            (self.trans_distn.expected_logpi, np.log(self.mf_pi_0),
+             self.mf_aBl, self._normalizer)
         self._set_expected_trans_stats()
 
 
