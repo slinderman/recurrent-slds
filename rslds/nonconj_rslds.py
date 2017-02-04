@@ -140,9 +140,6 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
                 expected_info_emission_params
 
         J_rec, h_rec = self.expected_info_rec_params
-
-        # warn("Dropping rec potentials")
-        # return J_node , h_node, log_Z_node
         return J_node + J_rec, h_node + h_rec, log_Z_node
 
     ### Updates for q(z)
@@ -207,20 +204,14 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         E_logpi = self.trans_distn.expected_logpi
         E_W = self.trans_distn.expected_W
         E_WWT = self.trans_distn.expected_WWT
+        E_logpi_WT = self.trans_distn.expected_logpi_WT
+        E_logpi_logpiT = self.trans_distn.expected_logpi_logpiT
+        E_logpi_sq = np.array([np.diag(Pk) for Pk in E_logpi_logpiT]).T
 
         # Compute m_{tk} = E[v_{tk}]
         m = E_z[:-1].dot(E_logpi) + E_x[:-1].dot(E_W)
 
         # Compute s_{tk} = E[v_{tk}^2]
-        # import warnings
-        # warnings.warn("Eq (43) is not implemented correctly.  "
-        #               "Needs second moments of W.  "
-        #               "It will still work with point estimates W")
-        # E_logpi_sq = E_logpi ** 2
-        E_logpi_logpiT = self.trans_distn.expected_logpi_logpiT
-        E_logpi_sq = np.array([np.diag(Pk) for Pk in E_logpi_logpiT]).T
-        # E_WWT = np.array([np.outer(E_W[:, k], E_W[:, k]) for k in range(K)])
-
         # E[v_{tk}^2] = e_k^T E[\psi_1 + \psi_2 + \psi_3] e_k  where
         # e_k^T \psi_1 e_k =
         #        = Tr(E[z_t z_t^T p_k p_k^T])               with p_k = P[:,k]  (kth col of trans matrix)
@@ -235,7 +226,6 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
         # \psi_2     = 2 diag*(E[W^T x_t z_t^T log pi])
         #            = 2 E[(x_t^T W) * (z_t^T log pi)]
         # psi_2 = 2 * E_x[:-1].dot(E_W) * E_z[:-1].dot(E_logpi)
-        E_logpi_WT = self.trans_distn.expected_logpi_WT
         psi_2 = 2 * np.einsum('td, ti, kid -> tk', E_x[:-1], E_z[:-1], E_logpi_WT)
 
         # e_k^T \psi_3 e_k =
@@ -333,13 +323,10 @@ class _NonconjugateRecurrentSLDSStatesMeanField(RecurrentSLDSStates):
 
         self.E_trans_stats = (E_u_zp1T, E_u_uT, E_u, self.a, self.lambda_bs)
 
-
     def meanfieldupdate(self, niter=1):
         niter = self.niter if hasattr(self, 'niter') else niter
         for itr in range(niter):
-            # warn("Skipping discrete state updates")
             self.meanfield_update_discrete_states()
-            # warn("Skipping continuous state updates")
             self.meanfield_update_gaussian_states()
             self.meanfield_update_auxiliary_vars()
             self._set_expected_trans_stats()
@@ -374,17 +361,14 @@ class SoftmaxRecurrentSLDS(RecurrentSLDS):
         self._clear_caches()
 
     def meanfield_update_trans_distn(self):
-        # warn("Skipping trans distn updates")
-        # return
-
         # Include the auxiliar variables of the lower bound
         sum_tuples = lambda lst: list(map(sum, zip(*lst)))
         self.trans_distn.meanfieldupdate(
             stats=sum_tuples([s.E_trans_stats for s in self.states_list]))
 
     def _init_mf_from_gibbs(self):
-        super(SoftmaxRecurrentSLDS, self)._init_mf_from_gibbs()
         self.trans_distn._initialize_mean_field()
+        super(SoftmaxRecurrentSLDS, self)._init_mf_from_gibbs()
 
     def meanfield_update_parameters(self):
         self.meanfield_update_init_dynamics_distns()

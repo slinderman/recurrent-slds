@@ -118,9 +118,11 @@ def make_figure(true_model, z_true, x_true, y,
 
     # Plot the inferred dynamics under the rSLDS
     ax3 = fig.add_subplot(gs[0, 1])
+    ax3_lim = 1.05 * abs(x_rslds[1:1000]).max(axis=0)
     plot_most_likely_dynamics(rslds.trans_distn,
                               rslds.dynamics_distns,
-                              xlim=(-3, 3), ylim=(-2, 2),
+                              xlim=(-ax3_lim[0], ax3_lim[0]),
+                              ylim=(-ax3_lim[1], ax3_lim[1]),
                               ax=ax3)
 
     # Overlay a partial trajectory
@@ -615,19 +617,29 @@ def make_rslds_parameters(C_init):
         )
         for _ in range(K)]
 
+    ths = np.random.uniform(np.pi/30., 1.0, size=K)
+    As = [random_rotation(D_latent, th) for th in ths]
+    As = [np.hstack((A, np.ones((D_latent,1)))) for A in As]
     dynamics_distns = [
         Regression(
+            A=As[k],
+            sigma=np.eye(D_latent),
             nu_0=D_latent + 2,
-            S_0=1e-4 * np.eye(D_latent),
+            S_0=np.eye(D_latent),
             M_0=np.hstack((np.eye(D_latent), np.zeros((D_latent, 1)))),
             K_0=np.eye(D_latent + 1),
         )
-        for _ in range(K)]
+        for k in range(K)]
 
-    emission_distns = \
-        DiagonalRegression(D_obs, D_latent + 1,
-                           A=C_init.copy(), sigmasq=np.ones(D_obs),
-                           alpha_0=2.0, beta_0=2.0)
+    if C_init is not None:
+        emission_distns = \
+            DiagonalRegression(D_obs, D_latent + 1,
+                               A=C_init.copy(), sigmasq=np.ones(D_obs),
+                               alpha_0=2.0, beta_0=2.0)
+    else:
+        emission_distns = \
+            DiagonalRegression(D_obs, D_latent + 1,
+                               alpha_0=2.0, beta_0=2.0)
 
     return init_dynamics_distns, dynamics_distns, emission_distns
 
@@ -673,7 +685,7 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
 
 @cached("rslds")
 def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
-              true_model=None, N_iters=10000):
+              true_model=None, initialization="none", N_iters=10000):
     print("Fitting rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -686,9 +698,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
         fixed_emission=False,
         alpha=3.)
 
-    rslds.add_data(y, inputs=inputs, mask=mask,
-                   stateseq=z_init.copy(),
-                   gaussian_states=x_init.copy())
+    rslds.add_data(y, inputs=inputs, mask=mask)
 
     # Initialize dynamics
     # print("Initializing dynamics with Gibbs sampling")
@@ -725,7 +735,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
 
 # @cached("rslds_variational")
 def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
-              true_model=None, N_gibbs=10, N_iters=10000):
+              true_model=None, initialization="none",  N_gibbs=100, N_iters=10000):
     print("Fitting rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -739,14 +749,11 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
         alpha=3.)
 
     # Set the prior precision for the dynamics params
-    rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
+    rslds.add_data(y, inputs=inputs, mask=mask)
 
-    rslds.add_data(y, inputs=inputs, mask=mask,
-                   stateseq=z_init.copy(),
-                   gaussian_states=x_init.copy())
-
-    if true_model is not None:
-        print("Initializing dynamics with true model")
+    if initialization == "true":
+        print("Initializing with true model")
+        rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
         rslds.trans_distn.W = true_model.trans_distn.W.copy()
         rslds.trans_distn.b = true_model.trans_distn.b.copy()
         rslds.trans_distn._initialize_mean_field()
@@ -761,8 +768,17 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
 
         rslds.states_list[0].stateseq = true_model.states_list[0].stateseq.copy()
         rslds.states_list[0].gaussian_states = true_model.states_list[0].gaussian_states.copy()
-    else:
-        print("Initializing dynamics with Gibbs sampling")
+
+    elif initialization == "given":
+        print("Initializing with given states")
+        rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
+        rslds.states_list[0].stateseq = z_init.copy()
+        rslds.states_list[0].gaussian_states = x_init.copy()
+        for _ in progprint_xrange(N_gibbs):
+            rslds.resample_model()
+
+    elif initialization == "gibbs":
+        print("Initializing with Gibbs sampling")
         for _ in progprint_xrange(N_gibbs):
             rslds.resample_model()
 
@@ -827,9 +843,8 @@ if __name__ == "__main__":
     #               true_model=true_model, N_iters=1000)
 
     rslds, rslds_lps, rslds_z_smpls, rslds_x = \
-        fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
-                  true_model=true_model, N_iters=100)
-
+        fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init=C_init,
+                  true_model=true_model, N_iters=100, initialization="given")
 
     # plot_trajectory_and_probs(
     #     rslds_z_smpls[-1][1:], rslds_x[1:],
