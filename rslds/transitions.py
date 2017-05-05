@@ -173,7 +173,7 @@ class SoftmaxInputHMMTransitions(object):
           This would let us seamlessly handle the "input-only" model.
     """
     def __init__(self, num_states, covariate_dim,
-                 mu_0=0.0, Sigma_0=1.0,
+                 mu_0=None, Sigma_0=None,
                  logpi=None, W=None):
         self.num_states = num_states
         self.covariate_dim = covariate_dim

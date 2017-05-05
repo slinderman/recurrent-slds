@@ -154,6 +154,7 @@ class RecurrentSLDS(_SLDSGibbsMixin, _SLDSMeanFieldMixin, InputHMM):
 
         self.fixed_emission = fixed_emission
 
+        # Bug?
         super(RecurrentSLDS, self).__init__(
             dynamics_distns, emission_distns, init_dynamics_distns,
             D_in=dynamics_distns[0].D_out, **kwargs)

@@ -44,34 +44,36 @@ from rslds.util import compute_psi_cmoments
 
 ### Global parameters
 T, K, K_true, D_obs, D_latent = 10000, 4, 4, 10, 2
-
 mask_start, mask_stop = 0, 0
-
-# Specifying the number of iterations of the Gibbs sampler
-N_iters = 1000
+N_samples = 1000
 
 # Save / cache the outputs
-runnum = 1
-results_dir = os.path.join("results", "nascar", "run{:03d}".format(runnum))
+CACHE_RESULTS = False
+RUN_NUMBER = 1
+RESULTS_DIR = os.path.join("results", "nascar", "run{:03d}".format(RUN_NUMBER))
 
 ### Helper functions
 def cached(results_name):
-    def _cache(func):
-        def func_wrapper(*args, **kwargs):
-            results_file = os.path.join(results_dir, results_name)
-            if not results_file.endswith(".pkl"):
-                results_file += ".pkl"
+    if CACHE_RESULTS:
+        def _cache(func):
+            def func_wrapper(*args, **kwargs):
+                results_file = os.path.join(RESULTS_DIR, results_name)
+                if not results_file.endswith(".pkl"):
+                    results_file += ".pkl"
 
-            if os.path.exists(results_file):
-                with open(results_file, "rb") as f:
-                    results = pickle.load(f)
-            else:
-                results = func(*args, **kwargs)
-                with open(results_file, "wb") as f:
-                    pickle.dump(results, f)
+                if os.path.exists(results_file):
+                    with open(results_file, "rb") as f:
+                        results = pickle.load(f)
+                else:
+                    results = func(*args, **kwargs)
+                    with open(results_file, "wb") as f:
+                        pickle.dump(results, f)
 
-            return results
-        return func_wrapper
+                return results
+            return func_wrapper
+    else:
+        _cache = lambda func: func
+
     return _cache
 
 ### Plotting code
@@ -212,7 +214,7 @@ def plot_all_dynamics(dynamics_distns,
                       color=colors[k], ax=ax)
 
     if filename is not None:
-        fig.savefig(os.path.join(results_dir, filename))
+        fig.savefig(os.path.join(RESULTS_DIR, filename))
 
 
 def plot_most_likely_dynamics(
@@ -325,7 +327,7 @@ def plot_trajectory_and_probs(z, x,
     plt.tight_layout()
     plt.title(title)
     if filename is not None:
-        plt.savefig(os.path.join(results_dir, filename))
+        plt.savefig(os.path.join(RESULTS_DIR, filename))
 
     return ax
 
@@ -427,7 +429,7 @@ def plot_z_samples(zs, zref=None,
         ax.set_title(title)
 
     if filename is not None:
-        plt.savefig(os.path.join(results_dir, filename))
+        plt.savefig(os.path.join(RESULTS_DIR, filename))
 
 ### Make an example with 2D latent states and 4 discrete states
 @cached("simulated_data")
@@ -495,14 +497,12 @@ def simulate_nascar():
 
     # C = np.hstack((np.eye(D_latent), np.zeros((D_obs, 1))))
     C = np.hstack((npr.randn(D_obs, D_latent), np.zeros((D_obs, 1))))
-    emission_distns = [
+    emission_distns = \
         DiagonalRegression(D_obs, D_latent+1,
                            A=C, sigmasq=1e-5 *np.ones(D_obs),
                            alpha_0=2.0, beta_0=2.0)
-    ]
 
     model = RecurrentSLDS(
-        D_in=D_latent,
         trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
                           sigmasq_A=100., sigmasq_b=100.),
         init_state_distn='uniform',
@@ -515,8 +515,7 @@ def simulate_nascar():
     # Sample from the model #
     #########################
     inputs = np.ones((T, 1))
-    (ys, x), z = model.generate(T=T, inputs=inputs)
-    y = ys[0]
+    (y, x), z = model.generate(T=T, inputs=inputs)
 
     # Maks off some data
     mask = np.ones((T,D_obs), dtype=bool)
@@ -791,7 +790,6 @@ def fit_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
         make_rslds_parameters(C_init)
 
     rslds = RecurrentOnlySLDS(
-        D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -918,7 +916,7 @@ if __name__ == "__main__":
 
     ## Fit a standard SLDS
     slds, slds_lps, slds_z_smpls, slds_x = \
-        fit_slds(inputs, z_perm, x_init, y, mask, C_init, N_iters=N_iters)
+        fit_slds(inputs, z_perm, x_init, y, mask, C_init, N_iters=N_samples)
 
     ## Fit a recurrent SLDS
     # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
@@ -939,7 +937,7 @@ if __name__ == "__main__":
 
     ## Fit an input-only recurrent SLDS
     iorslds, iorslds_lps, iorslds_z_smpls, iorslds_x = \
-        fit_inputonly_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init, N_iters=N_iters)
+        fit_inputonly_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init, N_iters=N_samples)
 
     ## Generate from the model
     T_gen = 2000
