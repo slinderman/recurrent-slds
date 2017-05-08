@@ -66,26 +66,31 @@ runnum = 3
 data_dir = os.path.join("experiments", "aistats", "bball")
 results_dir = os.path.join("experiments", "aistats", "bball", "heat", "run{:03d}".format(runnum))
 
+USE_CACHE = False
 
 ### Helper functions
 def cached(results_name):
-    def _cache(func):
-        def func_wrapper(*args, **kwargs):
-            results_file = os.path.join(results_dir, results_name)
-            if not results_file.endswith(".pkl"):
-                results_file += ".pkl"
+    if USE_CACHE:
+        def _cache(func):
+            def func_wrapper(*args, **kwargs):
+                results_file = os.path.join(results_dir, results_name)
+                if not results_file.endswith(".pkl"):
+                    results_file += ".pkl"
 
-            if os.path.exists(results_file):
-                with open(results_file, "rb") as f:
-                    results = pickle.load(f)
-            else:
-                assert os.path.exists(results_dir)
-                results = func(*args, **kwargs)
-                with open(results_file, "wb") as f:
-                    pickle.dump(results, f)
+                if os.path.exists(results_file):
+                    with open(results_file, "rb") as f:
+                        results = pickle.load(f)
+                else:
+                    assert os.path.exists(results_dir)
+                    results = func(*args, **kwargs)
+                    with open(results_file, "wb") as f:
+                        pickle.dump(results, f)
 
-            return results
-        return func_wrapper
+                return results
+            return func_wrapper
+    else:
+        _cache = lambda func: func
+        
     return _cache
 
 ### Plotting code

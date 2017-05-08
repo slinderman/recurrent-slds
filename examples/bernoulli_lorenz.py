@@ -50,27 +50,32 @@ T, K, D_obs, D_latent = 10000, 2, 100, 3
 mask_start, mask_stop = 750, 850
 N_iters = 1000      # Number of iterations of the Gibbs sampler
 
-runnum = 5
-results_dir = os.path.join("experiments", "aistats", "bernoulli_lorenz", "run{:03d}".format(runnum))
+CACHE_RESULTS = False
+RUN_NUMBER = 5
+RESULTS_DIR = os.path.join("experiments", "aistats", "bernoulli_lorenz", "run{:03d}".format(RUN_NUMBER))
 
 ### Helper functions
 def cached(results_name):
-    def _cache(func):
-        def func_wrapper(*args, **kwargs):
-            results_file = os.path.join(results_dir, results_name)
-            if not results_file.endswith(".pkl"):
-                results_file += ".pkl"
+    if CACHE_RESULTS:
+        def _cache(func):
+            def func_wrapper(*args, **kwargs):
+                results_file = os.path.join(RESULTS_DIR, results_name)
+                if not results_file.endswith(".pkl"):
+                    results_file += ".pkl"
 
-            if os.path.exists(results_file):
-                with open(results_file, "rb") as f:
-                    results = pickle.load(f)
-            else:
-                results = func(*args, **kwargs)
-                with open(results_file, "wb") as f:
-                    pickle.dump(results, f)
+                if os.path.exists(results_file):
+                    with open(results_file, "rb") as f:
+                        results = pickle.load(f)
+                else:
+                    results = func(*args, **kwargs)
+                    with open(results_file, "wb") as f:
+                        pickle.dump(results, f)
 
-            return results
-        return func_wrapper
+                return results
+            return func_wrapper
+    else:
+        _cache = lambda func: func
+
     return _cache
 
 ### Plotting code
@@ -170,8 +175,8 @@ def make_single_column_figure(mask, y, x_true,
     ax5.set_ylabel("Inf. $\\rho_{2}$", labelpad=5)
 
     # plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "reconstruction.pdf"))
-    plt.savefig(os.path.join(results_dir, "reconstruction.png"), dpi=300)
+    plt.savefig(os.path.join(RESULTS_DIR, "reconstruction.pdf"))
+    plt.savefig(os.path.join(RESULTS_DIR, "reconstruction.png"), dpi=300)
     plt.show()
 
 def make_figure(y, x_true, p_true,
@@ -297,8 +302,8 @@ def make_figure(y, x_true, p_true,
     plt.figtext(.66 + .025, .6 - .075, '(h)', fontproperties=fp)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, "bernoulli_lorenz.png"), dpi=200)
-    plt.savefig(os.path.join(results_dir, "bernoulli_lorenz.pdf"))
+    plt.savefig(os.path.join(RESULTS_DIR, "bernoulli_lorenz.png"), dpi=200)
+    plt.savefig(os.path.join(RESULTS_DIR, "bernoulli_lorenz.pdf"))
     plt.show()
 
 def solve_procrustes(x_true, x_inf):
@@ -448,7 +453,7 @@ def plot_z_samples(zs, zref=None,
         ax.set_title(title)
 
     if filename is not None:
-        plt.savefig(os.path.join(results_dir, filename))
+        plt.savefig(os.path.join(RESULTS_DIR, filename))
 
 ### Make an example with 2D latent states and 4 discrete states
 @cached("simulated_lorenz")
@@ -881,7 +886,7 @@ if __name__ == "__main__":
     # x_init[i_test] = 0
     x_init[i_test] = np.random.randn(*x_init[i_test].shape)
 
-    ## Fit an ARHMM for initialization
+    ## Fit a sticky ARHMM for initialization
     arhmm, z_init = fit_arhmm(x_init)
     z_init[i_test] = np.random.randint(0, K, size=i_test.size)
 
@@ -911,7 +916,8 @@ if __name__ == "__main__":
     # Compute the spiking probability
     test_model, test_x_smpls = iorslds, iorslds_x_smpls
     C, d = test_model.emission_distns[0].A[:,:D_latent], \
-           test_model.emission_distns[0].A[:,D_latent] + test_model.emission_distns[0].b[:,0].T
+           test_model.emission_distns[0].A[:,D_latent] + \
+           test_model.emission_distns[0].b[:,0].T
     rslds_psi_smpls = np.array([x.dot(C[:1].T) + d[0] for x in test_x_smpls])
     rslds_p_smpls = logistic(rslds_psi_smpls)
     rslds_p_mean = rslds_p_smpls.mean(0)
@@ -950,6 +956,14 @@ if __name__ == "__main__":
                   lds.emission_distns[0].b.T
     lds_p_gen = logistic(lds_psi_gen)
 
+    make_figure(y, x_true, p_true,
+                iorslds, iorslds_z_smpls, iorslds_x_smpls,
+                slds, slds_z_smpls, slds_x_smpls,
+                rslds_z_gen, rslds_x_gen,
+                slds_z_gen, slds_x_gen,
+                )
+
+
     # DEBUG
     # plt.figure()
     # plt.subplot(411)
@@ -961,28 +975,20 @@ if __name__ == "__main__":
     # plt.subplot(414)
     # plt.imshow(rslds_y_gen[:1000].T, interpolation="none")
 
-    n_plot = 0
-    plt.figure()
-    plt.subplot(411)
-    plt.plot(p_true[:T_gen, n_plot])
-    plt.title("True")
-    plt.subplot(412)
-    plt.plot(lds_p_gen[:T_gen, n_plot])
-    plt.title("LDS")
-    plt.subplot(413)
-    plt.plot(slds_p_gen[:T_gen, n_plot])
-    plt.title("SLDS")
-    plt.subplot(414)
-    plt.plot(rslds_p_gen[:T_gen, n_plot])
-    plt.title("rSLDS")
-
-
-    # make_figure(y, x_true, p_true,
-    #             iorslds, iorslds_z_smpls, iorslds_x_smpls,
-    #             slds, slds_z_smpls, slds_x_smpls,
-    #             rslds_z_gen, rslds_x_gen,
-    #             slds_z_gen, slds_x_gen,
-    #             )
+    # n_plot = 0
+    # plt.figure()
+    # plt.subplot(411)
+    # plt.plot(p_true[:T_gen, n_plot])
+    # plt.title("True")
+    # plt.subplot(412)
+    # plt.plot(lds_p_gen[:T_gen, n_plot])
+    # plt.title("LDS")
+    # plt.subplot(413)
+    # plt.plot(slds_p_gen[:T_gen, n_plot])
+    # plt.title("SLDS")
+    # plt.subplot(414)
+    # plt.plot(rslds_p_gen[:T_gen, n_plot])
+    # plt.title("rSLDS")
 
     ## Run a posterior predictive check
     # statistic = lambda y: y[:,0].std()

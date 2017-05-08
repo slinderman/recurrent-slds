@@ -3,7 +3,7 @@ import pickle
 
 import numpy as np
 import numpy.random as npr
-npr.seed(1)
+npr.seed(0)
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -454,11 +454,11 @@ def simulate_nascar():
 
     # Add a "right" state
     As.append(np.eye(D_latent))
-    bs.append(np.array([+0.05, 0.]))
+    bs.append(np.array([+0.1, 0.]))
 
     # Add a "right" state
     As.append(np.eye(D_latent))
-    bs.append(np.array([-0.05, 0.]))
+    bs.append(np.array([-0.25, 0.]))
 
     # Construct multinomial regression to divvy up the space #
     w1, b1 = np.array([+1.0, 0.0]), np.array([-2.0])   # x + b > 0 -> x > -b
@@ -888,7 +888,8 @@ if __name__ == "__main__":
     #                   filename="true_dynamics.png")
 
     ## Run PCA to get 2D dynamics
-    x_init, C_init = fit_factor_analysis(y, mask=mask)
+    # x_init, C_init = fit_factor_analysis(y, mask=mask)
+    x_init, C_init = fit_pca(y)
 
     ## Fit an ARHMM for initialization
     #  TODO: This is still a bit ugly...
