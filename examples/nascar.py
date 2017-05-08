@@ -695,7 +695,6 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
         make_rslds_parameters(C_init)
 
     rslds = RecurrentSLDS(
-        D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -782,9 +781,9 @@ def fit_sticky_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
 
     return rslds, lps, z_smpls, x_test
 
-@cached("inputonly_rslds")
-def fit_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
-                        N_iters=10000):
+@cached("roslds")
+def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
+               N_iters=10000):
     print("Fitting input only rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -828,15 +827,14 @@ def fit_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     return rslds, lps, z_smpls, x_test
 
 
-@cached("sticky_inputonly_rslds")
-def fit_sticky_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
-                        N_iters=10000):
+@cached("sticky_roslds")
+def fit_sticky_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
+                      N_iters=10000):
     print("Fitting sticky input only rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
     rslds = StickyRecurrentOnlySLDS(
-        D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           kappa=1., sigmasq_kappa=1.0,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
@@ -937,19 +935,19 @@ if __name__ == "__main__":
     #                filename="rslds_zsamples.png")
 
     ## Fit an input-only recurrent SLDS
-    iorslds, iorslds_lps, iorslds_z_smpls, iorslds_x = \
-        fit_inputonly_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init, N_iters=N_samples)
+    roslds, roslds_lps, roslds_z_smpls, roslds_x = \
+        fit_roslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init, N_iters=N_samples)
 
     ## Generate from the model
     T_gen = 2000
     inputs = np.ones((T_gen, 1))
-    (iorslds_y_gen, iorslds_x_gen), iorslds_z_gen = iorslds.generate(T=T_gen, inputs=inputs)
+    (iorslds_y_gen, iorslds_x_gen), iorslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
 
     (slds_ys_gen, slds_x_gen), slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
     slds_y_gen = slds_ys_gen[0]
 
     make_figure(true_model, z_true, x_true, y,
-                iorslds, iorslds_z_smpls, iorslds_x,
+                roslds, roslds_z_smpls, roslds_x,
                 iorslds_z_gen, iorslds_x_gen, iorslds_y_gen,
                 slds, slds_z_smpls, slds_x,
                 slds_z_gen, slds_x_gen, slds_y_gen,

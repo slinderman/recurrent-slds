@@ -34,10 +34,9 @@ from autoregressive.models import ARWeakLimitStickyHDPHMM
 from pyslds.util import get_empirical_ar_params
 from pylds.util import random_rotation
 
-from pinkybrain.models import MixedEmissionHMMSLDS
+from pyslds.models import HMMSLDS
 from rslds.rslds import RecurrentSLDS
 from rslds.nonconj_rslds import SoftmaxRecurrentOnlySLDS
-from rslds.util import compute_psi_cmoments
 
 ### Global parameters
 T, K, K_true, D_obs, D_latent = 10000, 4, 4, 10, 2
@@ -435,15 +434,6 @@ def plot_z_samples(zs, zref=None,
 @cached("simulated_data")
 def simulate_nascar():
     assert K_true == 4
-    # def random_rotation(n, theta):
-    #     rot = np.array([[np.cos(theta), -np.sin(theta)],
-    #                     [np.sin(theta), np.cos(theta)]])
-    #     out = np.zeros((n,n))
-    #     out[:2,:2] = rot
-    #     q = np.linalg.qr(np.random.randn(n,n))[0]
-    #     # q = np.eye(n)
-    #     return q.dot(out).dot(q.T)
-
     As = [random_rotation(D_latent, np.pi/24.),
           random_rotation(D_latent, np.pi/48.)]
 
@@ -454,11 +444,11 @@ def simulate_nascar():
 
     # Add a "right" state
     As.append(np.eye(D_latent))
-    bs.append(np.array([+0.05, 0.]))
+    bs.append(np.array([+0.1, 0.]))
 
     # Add a "right" state
     As.append(np.eye(D_latent))
-    bs.append(np.array([-0.05, 0.]))
+    bs.append(np.array([-0.25, 0.]))
 
     # Construct multinomial regression to divvy up the space
     w1, b1 = np.array([+1.0, 0.0]), np.array([-2.0])   # x + b > 0 -> x > -b
@@ -468,15 +458,6 @@ def simulate_nascar():
 
     reg_W = np.column_stack((100*w1, 100*w2, 10*w3,10*w4))
     reg_b = np.concatenate((100*b1, 100*b2, 10*b3, 10*b4))
-
-    # Scale the weights to make the transition boundary sharper
-    # reg_scale = 100.
-    # reg_b *= reg_scale
-    # reg_W *= reg_scale
-
-    # # Account for stick breaking asymmetry
-    # mu_b, _ = compute_psi_cmoments(np.ones(K_true))
-    # reg_b += mu_b[:,None]
 
     # Make a recurrent SLDS with these params #
     dynamics_distns = [
@@ -652,11 +633,11 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    slds = MixedEmissionHMMSLDS(
+    slds = HMMSLDS(
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
-        emission_distns=[emission_distns],
+        emission_distns=emission_distns,
         alpha=3.)
 
     slds.add_data(y, inputs=inputs, mask=mask)
@@ -817,12 +798,9 @@ if __name__ == "__main__":
 
     # plot_all_dynamics(true_model.dynamics_distns)
 
-    # plt.show()
-    # import sys; sys.exit()
-
-
     ## Run PCA to get 2D dynamics
-    x_init, C_init = fit_factor_analysis(y, mask=mask)
+    # x_init, C_init = fit_factor_analysis(y, mask=mask)
+    x_init, C_init = fit_pca(y)
 
     ## Fit an ARHMM for initialization
     arhmm, z_init = fit_arhmm(x_init)
@@ -864,8 +842,7 @@ if __name__ == "__main__":
     inputs = np.ones((T_gen, 1))
     (rslds_y_gen, rslds_x_gen), rslds_z_gen = rslds.generate(T=T_gen, inputs=inputs)
 
-    (slds_ys_gen, slds_x_gen), slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
-    slds_y_gen = slds_ys_gen[0]
+    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
 
     make_figure(true_model, z_true, x_true, y,
                 rslds, rslds_z_smpls, rslds_x,

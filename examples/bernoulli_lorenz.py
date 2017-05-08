@@ -35,15 +35,15 @@ from pybasicbayes.models import FactorAnalysis
 from pybasicbayes.distributions import \
     Regression, Gaussian, DiagonalRegression, AutoRegression
 
+from pyslds.models import HMMSLDS
 from pyslds.util import get_empirical_ar_params
 from pyhsmm.util.general import relabel_by_permutation
 from autoregressive.models import ARWeakLimitStickyHDPHMM
 
-from pinkybrain.decision_list import DecisionList
-from pinkybrain.distributions import MultinomialRegression, BernoulliRegression
-from pinkybrain.models import MixedEmissionHMMSLDS
-from pinkybrain.inslds import InputSLDS, StickyInputSLDS, InputOnlySLDS, StickyInputOnlySLDS
-from pinkybrain.util import logistic
+from rslds.decision_list import DecisionList
+from pypolyagamma.distributions import MultinomialRegression, BernoulliRegression
+from rslds.rslds import RecurrentSLDS, StickyRecurrentSLDS, RecurrentOnlySLDS, StickyRecurrentOnlySLDS
+from rslds.util import logistic
 
 ### Global parameters
 T, K, D_obs, D_latent = 10000, 2, 100, 3
@@ -124,7 +124,6 @@ def make_single_column_figure(mask, y, x_true,
 
     # Inferred discrete states (final sample)
     ax3 = fig.add_subplot(gs[scale + 1, 0])
-    # import ipdb; ipdb.set_trace()
     im = ax3.imshow(rslds_zs[-1, plt_slice][None,:], aspect="auto", extent=tlim + (0,1), vmin=0, vmax=K - 1,
                     cmap=gradient_cmap(colors[:K]), interpolation="nearest")
     ax3.imshow(imask[plt_slice, 0][None, :], cmap="Greys", alpha=0.25, extent=tlim + (0,1), aspect="auto")
@@ -134,7 +133,7 @@ def make_single_column_figure(mask, y, x_true,
     ax3.set_ylabel("Inf. $z$", labelpad=17)
 
     # Filling in missing data
-    iorslds_p = iorslds.states_list[0].smooth()[0]
+    iorslds_p = roslds.states_list[0].smooth()[0]
 
     n_to_plot = [0, 3]
     ax4 = fig.add_subplot(gs[scale + 2, 0])
@@ -181,6 +180,7 @@ def make_single_column_figure(mask, y, x_true,
 
 def make_figure(y, x_true, p_true,
                 rslds, zs_rslds, x_rslds,
+                rslds_p_mean, rslds_p_std,
                 slds, z_slds, x_slds,
                 z_rslds_gen, x_rslds_gen,
                 z_slds_gen, x_slds_gen,
@@ -253,15 +253,11 @@ def make_figure(y, x_true, p_true,
     # Plot something... z samples?
     ax4 = fig.add_subplot(gs[4:6,1])
     plot_z_samples(zs_rslds, plt_slice=tlim, ax=ax4)
-    # ax4.set_title("Inferred States (rSLDS)")
     ax4.imshow(imask[plt_slice, 0][None, :], cmap="Greys", alpha=0.25, extent=tlim + (len(zs_rslds),0), aspect="auto")
     ax4.set_xticks(xticks, [])
     ax4.set_xticklabels([])
     ax4.set_yticks([0, len(zs_rslds)])
     ax4.set_yticklabels(["0", "10$^3$"])
-    # ax4.set_yticks([])
-    # ax4.set_ylabel("Iter.")
-    # ax4.set_title("Inferred $z$")
     ax4.set_ylabel("Sampled $z$", labelpad=-1)
     ax4.set_xlabel("")
     plt.figtext(.27 + .025, .6 - .075, '(e)', fontproperties=fp)
@@ -302,14 +298,11 @@ def make_figure(y, x_true, p_true,
     plt.figtext(.66 + .025, .6 - .075, '(h)', fontproperties=fp)
 
     plt.tight_layout()
-    plt.savefig(os.path.join(RESULTS_DIR, "bernoulli_lorenz.png"), dpi=200)
-    plt.savefig(os.path.join(RESULTS_DIR, "bernoulli_lorenz.pdf"))
+    # plt.savefig(os.path.join(RESULTS_DIR, "bernoulli_lorenz.png"), dpi=200)
+    # plt.savefig(os.path.join(RESULTS_DIR, "bernoulli_lorenz.pdf"))
     plt.show()
 
 def solve_procrustes(x_true, x_inf):
-    # from scipy.spatial import procrustes
-    # xhat_true, xhat_inf, _ = procrustes(x_true, x_inf)
-    # return xhat_true, xhat_inf
     from scipy.linalg import orthogonal_procrustes
     R, scale = orthogonal_procrustes(x_inf, x_true)
     return x_inf.dot(R), R
@@ -642,16 +635,16 @@ def make_rslds_parameters(C_init):
     #                        A=C_init.copy(), sigmasq=np.ones(D_obs),
     #                        alpha_0=2.0, beta_0=2.0)]
 
-    emission_distns = [
+    emission_distns = \
         BernoulliRegression(D_obs, D_latent + 1,
-                            A=C_init.copy())]
+                            A=C_init.copy())
 
     return init_dynamics_distns, dynamics_distns, emission_distns
 
 
 def _fit_model(model, y, mask):
     # Fit the model
-    i_test = np.where(np.any(mask == False, axis=1))[0]
+    i_test = np.where(np.any(mask==False, axis=1))[0]
 
     lps = []
     hlls = []
@@ -701,11 +694,11 @@ def fit_lds(inputs, z_init, x_init, y, mask, C_init):
             K_0=np.eye(D_latent + 1),
         )]
 
-    emission_distns = [
+    emission_distns = \
         BernoulliRegression(D_obs, D_latent + 1,
-                            A=C_init.copy())]
+                            A=C_init.copy())
 
-    lds = MixedEmissionHMMSLDS(
+    lds = HMMSLDS(
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
@@ -731,7 +724,7 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init):
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    slds = MixedEmissionHMMSLDS(
+    slds = HMMSLDS(
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
@@ -757,7 +750,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init):
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = InputSLDS(
+    rslds = RecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
@@ -782,15 +775,14 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init):
 
     return _fit_model(rslds, y, mask)
 
-@cached("inputonly_rslds")
-def fit_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
-                        N_iters=10000):
+@cached("roslds")
+def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
+               N_iters=10000):
     print("Fitting input only rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = InputOnlySLDS(
-        D_in=D_latent,
+    rslds = RecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -822,7 +814,7 @@ def fit_sticky_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyInputOnlySLDS(
+    rslds = StickyRecurrentOnlySLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=100., sigmasq_b=100., kappa=1.0,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
@@ -944,15 +936,15 @@ if __name__ == "__main__":
     #     fit_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init)
 
     ## Fit an input-only recurrent SLDS
-    iorslds, iorslds_lps, iorslds_hlls, iorslds_z_smpls, iorslds_x_smpls, t_iorslds = \
-        fit_inputonly_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init)
+    roslds, roslds_lps, roslds_hlls, roslds_z_smpls, roslds_x_smpls, t_roslds = \
+        fit_roslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init)
 
     ## Fit a sticky input-only recurrent SLDS
     # siorslds, siorslds_lps, siorslds_hlls,  siorslds_z_smpls, siorslds_x_smpls, t_siorslds = \
     #     fit_sticky_inputonly_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init)
 
     # Compute the spiking probability
-    test_model, test_x_smpls = iorslds, iorslds_x_smpls
+    test_model, test_x_smpls = roslds, roslds_x_smpls
     C, d = test_model.emission_distns[0].A[:,:D_latent], \
            test_model.emission_distns[0].A[:,D_latent] + \
            test_model.emission_distns[0].b[:,0].T
@@ -964,12 +956,7 @@ if __name__ == "__main__":
     ## Generate from the model
     T_gen = 10000
     inputs = np.ones((T_gen, 1))
-    # for k in range(K):
-    #     iorslds.init_dynamics_distns[k].mu = x_init[0].copy()
-    #     iorslds.init_dynamics_distns[k].sigma = 1e-3 * np.eye(D_latent)
-
-    (rslds_ys_gen, rslds_x_gen), rslds_z_gen = test_model.generate(T=T_gen, inputs=inputs, with_noise=True)
-    rslds_y_gen = rslds_ys_gen[0]
+    (rslds_y_gen, rslds_x_gen), rslds_z_gen = test_model.generate(T=T_gen, inputs=inputs, with_noise=True)
     rslds_psi_gen = rslds_x_gen.dot(test_model.emission_distns[0].A[:, :D_latent].T) + \
                     test_model.emission_distns[0].A[:, D_latent] + \
                     test_model.emission_distns[0].b.T
@@ -979,54 +966,26 @@ if __name__ == "__main__":
         slds.init_dynamics_distns[k].mu = x_init[0].copy()
         slds.init_dynamics_distns[k].sigma = 1e-3 * np.eye(D_latent)
 
-    (slds_ys_gen, slds_x_gen), slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
-    slds_y_gen = slds_ys_gen[0]
+    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
     slds_psi_gen = slds_x_gen.dot(slds.emission_distns[0].A[:, :D_latent].T) + \
                    slds.emission_distns[0].A[:, D_latent] + \
                    slds.emission_distns[0].b.T
     slds_p_gen = logistic(slds_psi_gen)
     # slds_y_gen = slds_x_gen.dot(slds.emission_distns[0].A[:,:D_latent].T) + slds.emission_distns[0].A[:,D_latent]
 
-    (lds_ys_gen, lds_x_gen), lds_z_gen = lds.generate(T=T_gen, inputs=inputs)
-    lds_y_gen = lds_ys_gen[0]
+    lds_y_gen, lds_x_gen, lds_z_gen = lds.generate(T=T_gen, inputs=inputs)
     lds_psi_gen = lds_x_gen.dot(lds.emission_distns[0].A[:, :D_latent].T) + \
                   lds.emission_distns[0].A[:, D_latent] + \
                   lds.emission_distns[0].b.T
     lds_p_gen = logistic(lds_psi_gen)
 
     make_figure(y, x_true, p_true,
-                iorslds, iorslds_z_smpls, iorslds_x_smpls,
+                roslds, roslds_z_smpls, roslds_x_smpls,
+                rslds_p_mean, rslds_p_std,
                 slds, slds_z_smpls, slds_x_smpls,
                 rslds_z_gen, rslds_x_gen,
                 slds_z_gen, slds_x_gen,
                 )
-
-
-    # DEBUG
-    # plt.figure()
-    # plt.subplot(411)
-    # plt.imshow(y[:1000].T, interpolation="none")
-    # plt.subplot(412)
-    # plt.imshow(lds_y_gen[:1000].T, interpolation="none")
-    # plt.subplot(413)
-    # plt.imshow(slds_y_gen[:1000].T, interpolation="none")
-    # plt.subplot(414)
-    # plt.imshow(rslds_y_gen[:1000].T, interpolation="none")
-
-    # n_plot = 0
-    # plt.figure()
-    # plt.subplot(411)
-    # plt.plot(p_true[:T_gen, n_plot])
-    # plt.title("True")
-    # plt.subplot(412)
-    # plt.plot(lds_p_gen[:T_gen, n_plot])
-    # plt.title("LDS")
-    # plt.subplot(413)
-    # plt.plot(slds_p_gen[:T_gen, n_plot])
-    # plt.title("SLDS")
-    # plt.subplot(414)
-    # plt.plot(rslds_p_gen[:T_gen, n_plot])
-    # plt.title("rSLDS")
 
     ## Run a posterior predictive check
     # statistic = lambda y: y[:,0].std()
@@ -1040,7 +999,7 @@ if __name__ == "__main__":
 
     # run_ppc(statistic, y, [lds, slds, iorslds])
 
-    ## Run a posterior predictive check on the true and generated probabilities
+    # Run a posterior predictive check on the true and generated probabilities
     # statistic = lambda p: (p[:T_gen,0] < 0.2).sum()
     # from scipy.stats import skew, kurtosis
     # statistic = lambda p: (skew(p[:T_gen, 0])**2 + 1) / kurtosis(p[:T_gen, 0])
@@ -1054,8 +1013,8 @@ if __name__ == "__main__":
     #     # print(vlen[hv==True])
     #     return np.max(vlen[hv==True])
     #
-    # run_ppc_on_probs(statistic, p_true, [lds, slds, iorslds], T_gen=T_gen)
-
+    # run_ppc_on_probs(statistic, p_true, [lds, slds, roslds], T_gen=T_gen)
+    #
     # T_gen = 3000
     # from pyhsmm.util.general import rle
     # def statistic(p):
@@ -1064,7 +1023,7 @@ if __name__ == "__main__":
     #     # print(vlen[hv==True])
     #     return np.max(vlen[hv==True])
     #
-    # run_ppc_on_probs(statistic, p_true, [lds, slds, iorslds], N_iter=1000, T_gen=T_gen)
+    # run_ppc_on_probs(statistic, p_true, [lds, slds, roslds], N_iter=1000, T_gen=T_gen)
 
 
     plt.show()

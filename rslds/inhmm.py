@@ -223,7 +223,7 @@ class RecurrentARHMM(InputARHMM):
 class RecurrentOnlyARHMM(RecurrentARHMM):
     _trans_class = InputOnlyHMMTransitions
 
-class StickyInputOnlyRecurrentARHMM(RecurrentARHMM):
+class StickyRecurrentOnlyARHMM(RecurrentARHMM):
     _trans_class = StickyInputOnlyHMMTransitions
 
 class SoftmaxRecurrentARHMM(RecurrentARHMM):

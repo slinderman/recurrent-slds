@@ -43,16 +43,14 @@ from pybasicbayes.models import FactorAnalysis
 from pybasicbayes.distributions import \
     Regression, Gaussian, DiagonalRegression, AutoRegression
 
-from pgmult.utils import compute_psi_cmoments
+from pyslds.models import WeakLimitStickyHDPHMMSLDS
 from pyslds.util import get_empirical_ar_params
 from pyhsmm.util.general import relabel_by_permutation
 from autoregressive.models import ARWeakLimitStickyHDPHMM, ARHMM
+from pypolyagamma.distributions import MultinomialRegression
 
-from pinkybrain.decision_list import DecisionList
-from pinkybrain.distributions import MultinomialRegression
-from pinkybrain.models import MixedEmissionHMMSLDS, MixedEmissionWeakLimitStickyHDPHMMSLDS
-from pinkybrain.inhmm import RecurrentARHMM, InputOnlyRecurrentARHMM, StickyInputOnlyRecurrentARHMM
-from pinkybrain.inslds import InputSLDS, StickyInputSLDS, InputOnlySLDS, StickyInputOnlySLDS
+from rslds.decision_list import DecisionList
+from rslds.inhmm import RecurrentARHMM, RecurrentOnlyARHMM, StickyRecurrentOnlyARHMM
 
 ### Global parameters
 K, D_obs, D_latent, N_lags = 30, 2, 4, 1
@@ -803,7 +801,7 @@ def fit_iorarhmm(xs, affine=True, N_iter=1000):
         for _ in range(K)]
 
 
-    rarhmm = InputOnlyRecurrentARHMM(
+    rarhmm = RecurrentOnlyARHMM(
         D_in=D_obs,
         init_state_distn='uniform',
         obs_distns=dynamics_distns,
@@ -848,7 +846,7 @@ def fit_sticky_iorarhmm(xs, affine=True, kappa=1.0, N_iter=1000, z_inits=None):
         for _ in range(K)]
 
 
-    rarhmm = StickyInputOnlyRecurrentARHMM(
+    rarhmm = StickyInputOnlyARHMM(
         D_in=D_obs,
         trans_params=dict(kappa=kappa),
         init_state_distn='uniform',
@@ -932,8 +930,7 @@ def fit_slds(ys, inputss, masks,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    # slds = MixedEmissionHMMSLDS(
-    slds = MixedEmissionWeakLimitStickyHDPHMMSLDS(
+    slds = WeakLimitStickyHDPHMMSLDS(
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
