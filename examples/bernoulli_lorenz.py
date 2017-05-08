@@ -455,10 +455,48 @@ def plot_z_samples(zs, zref=None,
     if filename is not None:
         plt.savefig(os.path.join(RESULTS_DIR, filename))
 
+def lorenz(T=3000, dt=0.01):
+    from scipy.integrate import odeint
+
+    # Lorenz attractor parameters
+    mu = np.array([-2.5, -2.5, 24])
+    std = 15.
+    standardize = lambda state: (state - mu) / std
+    unstandardize = lambda stdstate: std * stdstate + mu
+
+    sigma = 10.0
+    rho = 28.0
+    beta = 8.0 / 3.0
+
+    def _lorenz(stdstate, t):
+        # unpack the state vector
+        state = unstandardize(stdstate)
+        x = state[0]
+        y = state[1]
+        z = state[2]
+
+        # compute state derivatives
+        xd = sigma * (y - x)
+        yd = (rho - z) * x - y
+        zd = x * y - beta * z
+
+        # standardize the derivatives
+        # dxs / dt = dxs / dx * dx /dt
+        #          = 1/std * dx / dt
+        dstate = np.array([xd, yd, zd]) / std
+
+        # return the state derivatives
+        return dstate
+
+    x0 = standardize(np.array([2.0, 3.0, 4.0]))
+    t = np.arange(0.0, T * dt, dt)
+    xfull = odeint(_lorenz, x0, t)
+
+    return xfull
+
 ### Make an example with 2D latent states and 4 discrete states
 @cached("simulated_lorenz")
 def simulate_lorenz():
-    from pinkybrain.util import lorenz
     x = lorenz(T)
 
     if D_latent == D_obs:
