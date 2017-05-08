@@ -35,7 +35,7 @@ from pyslds.util import get_empirical_ar_params
 
 from pypolyagamma.distributions import MultinomialRegression
 
-from pinkybrain.models import MixedEmissionHMMSLDS
+from pyslds.models import HMMSLDS
 
 from rslds.decision_list import DecisionList
 from rslds.rslds import RecurrentSLDS, StickyRecurrentSLDS, \
@@ -655,11 +655,11 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    slds = MixedEmissionHMMSLDS(
+    slds = HMMSLDS(
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
-        emission_distns=[emission_distns],
+        emission_distns=emission_distns,
         alpha=3.)
 
     slds.add_data(y, inputs=inputs, mask=mask)
@@ -942,9 +942,7 @@ if __name__ == "__main__":
     T_gen = 2000
     inputs = np.ones((T_gen, 1))
     (iorslds_y_gen, iorslds_x_gen), iorslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
-
-    (slds_ys_gen, slds_x_gen), slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
-    slds_y_gen = slds_ys_gen[0]
+    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
 
     make_figure(true_model, z_true, x_true, y,
                 roslds, roslds_z_smpls, roslds_x,
