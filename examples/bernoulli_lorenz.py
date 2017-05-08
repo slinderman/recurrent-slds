@@ -33,7 +33,7 @@ from hips.plotting.sausage import sausage_plot
 from pybasicbayes.util.text import progprint_xrange
 from pybasicbayes.models import FactorAnalysis
 from pybasicbayes.distributions import \
-    Regression, Gaussian, DiagonalRegression, AutoRegression
+    Regression, Gaussian, AutoRegression
 
 from pyslds.models import HMMSLDS
 from pyslds.util import get_empirical_ar_params
@@ -42,7 +42,7 @@ from autoregressive.models import ARWeakLimitStickyHDPHMM
 
 from rslds.decision_list import DecisionList
 from pypolyagamma.distributions import MultinomialRegression, BernoulliRegression
-from rslds.rslds import RecurrentSLDS, StickyRecurrentSLDS, RecurrentOnlySLDS, StickyRecurrentOnlySLDS
+from rslds.rslds import RecurrentSLDS, RecurrentOnlySLDS, StickyRecurrentOnlySLDS
 from rslds.util import logistic
 
 ### Global parameters
@@ -52,7 +52,7 @@ N_iters = 1000      # Number of iterations of the Gibbs sampler
 
 CACHE_RESULTS = False
 RUN_NUMBER = 5
-RESULTS_DIR = os.path.join("experiments", "aistats", "bernoulli_lorenz", "run{:03d}".format(RUN_NUMBER))
+RESULTS_DIR = os.path.join("results", "bernoulli_lorenz", "run{:03d}".format(RUN_NUMBER))
 
 ### Helper functions
 def cached(results_name):
@@ -629,11 +629,6 @@ def make_rslds_parameters(C_init):
             K_0=np.eye(D_latent + 1),
         )
         for _ in range(K)]
-
-    # emission_distns = [
-    #     DiagonalRegression(D_obs, D_latent + 1,
-    #                        A=C_init.copy(), sigmasq=np.ones(D_obs),
-    #                        alpha_0=2.0, beta_0=2.0)]
 
     emission_distns = \
         BernoulliRegression(D_obs, D_latent + 1,
