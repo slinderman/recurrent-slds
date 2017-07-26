@@ -16,7 +16,7 @@ from hips.plotting.colormaps import gradient_cmap
 cmap = gradient_cmap(colors)
 
 from pybasicbayes.distributions import Gaussian
-from rslds.inhmm import InputHMM
+from rslds.models import InputHMM
 
 
 #################################################

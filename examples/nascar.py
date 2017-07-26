@@ -38,8 +38,8 @@ from pypolyagamma.distributions import MultinomialRegression
 from pyslds.models import HMMSLDS
 
 from rslds.decision_list import DecisionList
-from rslds.rslds import RecurrentSLDS, StickyRecurrentSLDS, \
-    RecurrentOnlySLDS, StickyRecurrentOnlySLDS
+from rslds.rslds import PGRecurrentSLDS, StickyPGRecurrentSLDS, \
+    PGRecurrentOnlySLDS, StickyPGRecurrentOnlySLDS
 from rslds.util import compute_psi_cmoments
 
 ### Global parameters
@@ -502,7 +502,7 @@ def simulate_nascar():
                            A=C, sigmasq=1e-5 *np.ones(D_obs),
                            alpha_0=2.0, beta_0=2.0)
 
-    model = RecurrentSLDS(
+    model = PGRecurrentSLDS(
         trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
                           sigmasq_A=100., sigmasq_b=100.),
         init_state_distn='uniform',
@@ -694,7 +694,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = RecurrentSLDS(
+    rslds = PGRecurrentSLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -741,7 +741,7 @@ def fit_sticky_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyRecurrentSLDS(
+    rslds = StickyPGRecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000., kappa=100.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
@@ -788,7 +788,7 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = RecurrentOnlySLDS(
+    rslds = PGRecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -834,7 +834,7 @@ def fit_sticky_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyRecurrentOnlySLDS(
+    rslds = StickyPGRecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           kappa=1., sigmasq_kappa=1.0,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),

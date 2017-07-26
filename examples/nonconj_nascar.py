@@ -3,7 +3,7 @@ import pickle
 
 import numpy as np
 import numpy.random as npr
-npr.seed(1)
+npr.seed(1234)
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -35,8 +35,7 @@ from pyslds.util import get_empirical_ar_params
 from pylds.util import random_rotation
 
 from pyslds.models import HMMSLDS
-from rslds.rslds import RecurrentSLDS
-from rslds.nonconj_rslds import SoftmaxRecurrentOnlySLDS
+from rslds.models import SoftmaxRecurrentOnlySLDS, SoftmaxRecurrentSLDS
 
 ### Global parameters
 T, K, K_true, D_obs, D_latent = 10000, 4, 4, 10, 2
@@ -44,7 +43,7 @@ mask_start, mask_stop = 0, 0
 N_iters = 1000
 
 # Save / cache the outputs
-CACHE_RESULTS = False
+CACHE_RESULTS = True
 RUN_NUMBER = 1
 RESULTS_DIR = os.path.join("results", "nascar", "run{:03d}".format(RUN_NUMBER))
 
@@ -262,10 +261,7 @@ def plot_trans_probs(reg,
     XX,YY = np.meshgrid(np.linspace(*xlim,n_pts),
                         np.linspace(*ylim,n_pts))
     XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
-
-    D_reg = reg.D_in
-    inputs = np.hstack((np.zeros((n_pts**2, D_reg-2)), XY))
-    test_prs = reg.pi(inputs)
+    test_prs = reg.get_trans_matrices(XY)[:,0,:]
 
     if ax is None:
         fig = plt.figure(figsize=(10,6))
@@ -606,7 +602,7 @@ def make_rslds_parameters(C_init):
         Regression(
             A=As[k],
             sigma=np.eye(D_latent),
-            nu_0=D_latent + 2,
+            nu_0=D_latent + 1000,
             S_0=np.eye(D_latent),
             M_0=np.hstack((np.eye(D_latent), np.zeros((D_latent, 1)))),
             K_0=np.eye(D_latent + 1),
@@ -628,7 +624,7 @@ def make_rslds_parameters(C_init):
 
 @cached("slds")
 def fit_slds(inputs, z_init, x_init, y, mask, C_init,
-              N_iters=10000):
+              N_iters=1000):
     print("Fitting standard SLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -665,7 +661,7 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
 
     return slds, lps, z_smpls, x_test
 
-@cached("rslds")
+# @cached("rslds")
 def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
               true_model=None, initialization="none", N_iters=10000):
     print("Fitting rSLDS")
@@ -716,8 +712,12 @@ def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
     return rslds, lps, z_smpls, x_test
 
 # @cached("rslds_variational")
-def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
-              true_model=None, initialization="none",  N_gibbs=100, N_iters=10000):
+def fit_rslds_variational(
+        inputs, y, mask,
+        x_init=None, z_init=None, C_init=None, initialization="none",
+        true_model=None,
+        N_iters=10000):
+
     print("Fitting rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
@@ -754,15 +754,11 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
     elif initialization == "given":
         print("Initializing with given states")
         rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
-        rslds.states_list[0].stateseq = z_init.copy()
+        rslds.states_list[0].stateseq = z_init.astype(np.int32).copy()
         rslds.states_list[0].gaussian_states = x_init.copy()
-        for _ in progprint_xrange(N_gibbs):
-            rslds.resample_model()
 
-    elif initialization == "gibbs":
-        print("Initializing with Gibbs sampling")
-        for _ in progprint_xrange(N_gibbs):
-            rslds.resample_model()
+    else:
+        print("no initialization")
 
     rslds._init_mf_from_gibbs()
 
@@ -771,12 +767,11 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
     z_smpls = [np.argmax(rslds.states_list[0].expected_states, axis=1)]
     for _ in progprint_xrange(N_iters):
         vlbs.append(rslds.meanfield_coordinate_descent_step(compute_vlb=True))
-        z_smpls.append(np.argmax(rslds.states_list[0].expected_states, axis=1))
+        z_smpls.append(rslds.states_list[0].stateseq.copy())
 
-    x_smpl = rslds.states_list[0].smoothed_mus
+    x_smpl = rslds.states_list[0].smoothed_mus.copy()
     z_smpls = np.array(z_smpls)
     vlbs = np.array(vlbs)
-
 
     if true_model is not None:
         print("True logpi:\n{}".format(true_model.trans_distn.logpi))
@@ -788,29 +783,93 @@ def fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init,
     return rslds, vlbs, z_smpls, x_smpl
 
 
+
+# @cached("rslds_vbem")
+def fit_rslds_vbem(
+        inputs, y, mask,
+        x_init=None, z_init=None, C_init=None, initialization="none",
+        true_model=None,
+        N_iters=10000):
+
+    print("Fitting rSLDS")
+    init_dynamics_distns, dynamics_distns, emission_distns = \
+        make_rslds_parameters(C_init)
+
+    rslds = SoftmaxRecurrentOnlySLDS(
+    # rslds = SoftmaxRecurrentSLDS(
+        init_state_distn='uniform',
+        init_dynamics_distns=init_dynamics_distns,
+        dynamics_distns=dynamics_distns,
+        emission_distns=emission_distns,
+        fixed_emission=False,
+        alpha=3.)
+
+    # Set the prior precision for the dynamics params
+    rslds.add_data(y, inputs=inputs, mask=mask)
+
+    if initialization == "true":
+        print("Initializing with true model")
+        rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
+        rslds.trans_distn.W = true_model.trans_distn.W.copy()
+        rslds.trans_distn.b = true_model.trans_distn.b.copy()
+
+        for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
+            rdd.A = tdd.A.copy()
+            rdd.sigma = tdd.sigma.copy()
+
+        rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
+        rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
+        rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent+1)
+
+        rslds.states_list[0].stateseq = true_model.states_list[0].stateseq.copy()
+        rslds.states_list[0].gaussian_states = true_model.states_list[0].gaussian_states.copy()
+
+        rslds._init_mf_from_gibbs()
+        rslds._vb_E_step()
+
+    elif initialization == "given":
+        print("Initializing with given states")
+        rslds.emission_distns[0].J_0 = 1e2 * np.eye(D_latent + 1)
+        rslds.states_list[0].stateseq = z_init.astype(np.int32).copy()
+        rslds.states_list[0].gaussian_states = x_init.copy()
+        rslds._init_mf_from_gibbs()
+        rslds._vb_M_step()
+        rslds._vb_E_step()
+
+    else:
+        print("no initialization")
+        rslds._init_mf_from_gibbs()
+
+    # Fit the model
+    vlbs = []
+    z_smpls = [rslds.states_list[0].stateseq.copy()]
+    for _ in progprint_xrange(N_iters):
+        rslds.VBEM_step()
+        vlbs.append(rslds.VBEM_ELBO())
+        z_smpls.append(rslds.states_list[0].stateseq.copy())
+
+    x_smpl = rslds.states_list[0].smoothed_mus.copy()
+    z_smpls = np.array(z_smpls)
+    vlbs = np.array(vlbs)
+
+    if true_model is not None:
+        print("True logpi:\n{}".format(true_model.trans_distn.logpi))
+        print("True W:\n{}".format(true_model.trans_distn.W))
+
+    print("Inf logpi:\n{}".format(rslds.trans_distn.logpi))
+    print("Inf W:\n{}".format(rslds.trans_distn.W))
+
+    return rslds, vlbs, z_smpls, x_smpl
+
 if __name__ == "__main__":
     ## Simulate NASCAR data
     true_model, inputs, z_true, x_true, y, mask = simulate_nascar()
 
-    # plot_most_likely_dynamics(true_model.trans_distn,
-    #                           true_model.dynamics_distns,
-    #                           figsize=(3,1.5))
-
-    # plot_all_dynamics(true_model.dynamics_distns)
-
     ## Run PCA to get 2D dynamics
-    # x_init, C_init = fit_factor_analysis(y, mask=mask)
     x_init, C_init = fit_pca(y)
 
     ## Fit an ARHMM for initialization
     arhmm, z_init = fit_arhmm(x_init)
-    # plot_trajectory_and_probs(
-    #     z_init[1:], x_init[1:],
-    #     title="Sticky ARHMM")
-    # plt.show()
-
-    # plot_all_dynamics(arhmm.obs_distns,
-    #                   filename="sticky_arhmm_dynamics.png")
 
     ## Fit a standard SLDS
     slds, slds_lps, slds_z_smpls, slds_x = \
@@ -818,24 +877,38 @@ if __name__ == "__main__":
 
     ## Fit a recurrent SLDS
     # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
-    #     fit_rslds(inputs, z_init, x_init, y, mask, C_init,
-    #               true_model=true_model, N_iters=1000)
+    #     fit_rslds_variational(inputs, y, mask,
+    #                           z_init=z_init, x_init=x_init, C_init=C_init,
+    #                           initialization="given",
+    #                           true_model=true_model, N_iters=100)
+
+    # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
+    #     fit_rslds_vbem(inputs, z_init, x_init, y, mask, C_init=C_init,
+    #                    true_model=true_model, N_iters=100,
+    #                    initialization="true")
 
     rslds, rslds_lps, rslds_z_smpls, rslds_x = \
-        fit_rslds_variational(inputs, z_init, x_init, y, mask, C_init=C_init,
-                  true_model=true_model, N_iters=100, initialization="given")
+        fit_rslds_vbem(inputs, y, mask,
+                       z_init=z_init, x_init=x_init, C_init=C_init,
+                       initialization="given",
+                       true_model=true_model, N_iters=100)
 
-    # plot_trajectory_and_probs(
-    #     rslds_z_smpls[-1][1:], rslds_x[1:],
-    #     trans_distn=rslds.trans_distn,
-    #     title="Recurrent SLDS",
-    #     filename="rslds.png")
-    #
-    # plot_all_dynamics(rslds.dynamics_distns)
-    #
-    # plot_z_samples(rslds_z_smpls,
-    #                plt_slice=(0,1000),
-    #                filename="rslds_zsamples.png")
+    # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
+    #     fit_rslds_vbem(inputs, y, mask,
+    #                    initialization="none",
+    #                    N_iters=100)
+
+    plot_trajectory_and_probs(
+        rslds_z_smpls[-1][1:], rslds_x[1:],
+        trans_distn=rslds.trans_distn,
+        title="Recurrent SLDS",
+        filename="rslds.png")
+
+    plot_all_dynamics(rslds.dynamics_distns)
+
+    plot_z_samples(rslds_z_smpls,
+                   plt_slice=(0,1000),
+                   filename="rslds_zsamples.png")
 
     ## Generate from the model
     T_gen = 2000

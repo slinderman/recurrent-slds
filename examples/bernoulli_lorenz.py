@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.gridspec as gridspec
 from matplotlib.font_manager import FontProperties
-from mpl_toolkits.mplot3d import Axes3D
 
 import seaborn as sns
 color_names = ["windows blue",
@@ -42,7 +41,7 @@ from autoregressive.models import ARWeakLimitStickyHDPHMM
 
 from rslds.decision_list import DecisionList
 from pypolyagamma.distributions import MultinomialRegression, BernoulliRegression
-from rslds.rslds import RecurrentSLDS, RecurrentOnlySLDS, StickyRecurrentOnlySLDS
+from rslds.rslds import PGRecurrentSLDS, PGRecurrentOnlySLDS, StickyPGRecurrentOnlySLDS
 from rslds.util import logistic
 
 ### Global parameters
@@ -745,7 +744,7 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init):
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = RecurrentSLDS(
+    rslds = PGRecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
@@ -777,7 +776,7 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = RecurrentOnlySLDS(
+    rslds = PGRecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -809,7 +808,7 @@ def fit_sticky_inputonly_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyRecurrentOnlySLDS(
+    rslds = StickyPGRecurrentOnlySLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=100., sigmasq_b=100., kappa=1.0,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),

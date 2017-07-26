@@ -16,7 +16,7 @@ from hips.plotting.colormaps import gradient_cmap
 cmap = gradient_cmap(colors)
 
 from pybasicbayes.distributions import Gaussian
-from rslds.inhmm import InputHMM, SoftmaxInputHMM, SoftmaxInputOnlyHMM
+from rslds.models import InputHMM, SoftmaxInputHMM, SoftmaxInputOnlyHMM
 
 
 #################################################
@@ -55,7 +55,7 @@ dataset = [true_model.generate(T, covariates=covariate_seq[:,:D_in]) for _ in ra
 # Generate inference test model - initialized randomly #
 ########################################################
 test_model = \
-    SoftmaxInputOnlyHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
+    SoftmaxInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
                     init_state_concentration=1.0,
                     D_in=D_in,)
 
@@ -65,13 +65,15 @@ for (obs, covs), _ in dataset:
 # run sampler
 print("io hmm sampling")
 num_iter = 200
-A_smpls = np.zeros((num_iter,) + test_model.trans_distn.W.shape)
+W_smpls = np.zeros((num_iter,) + test_model.trans_distn.W.shape)
 z_smpls = np.zeros((num_iter, T))
+import ipdb; ipdb.set_trace()
 for itr in range(num_iter):
-    test_model.resample_model(num_procs=0)
+    # test_model.resample_model()
+    test_model.EM_step()
     if itr % 20 == 0:
         print("Iter {}.  LL:  {:.1f}".format(itr, test_model.log_likelihood()))
-    A_smpls[itr, :, :] = test_model.trans_distn.W
+    W_smpls[itr, :, :] = test_model.trans_distn.W
     z_smpls[itr] = test_model.stateseqs[0]
 
 # Get the inferred state sequence

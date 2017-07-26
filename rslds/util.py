@@ -169,3 +169,17 @@ def get_density(alpha_k, alpha_rest):
         return logistic(psi)**alpha_k * logistic(-psi)**alpha_rest \
             / beta(alpha_k,alpha_rest)
     return density
+
+def inhmm_entropy(params, stats):
+    log_transmatrices, log_pi_0, aBl, _ = params
+    E_z, E_ztztp1T, log_Z = stats
+    T, K = E_z.shape
+    assert aBl.shape == (T, K)
+    assert E_ztztp1T.shape == (T - 1, K, K)
+    assert log_transmatrices.shape == (T - 1, K, K)
+
+    neg_entropy = np.sum(E_z[0] * log_pi_0)
+    neg_entropy += np.sum(E_z * aBl)
+    neg_entropy += np.sum(E_ztztp1T * log_transmatrices)
+    neg_entropy -= log_Z
+    return -neg_entropy
