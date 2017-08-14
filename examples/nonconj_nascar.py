@@ -3,33 +3,13 @@ import pickle
 
 import numpy as np
 import numpy.random as npr
-npr.seed(1234)
-
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib.gridspec as gridspec
-from matplotlib.font_manager import FontProperties
-
-import seaborn as sns
-color_names = ["windows blue",
-               "red",
-               "amber",
-               "faded green",
-               "dusty purple",
-               "crimson",
-               "greyish"]
-colors = sns.xkcd_palette(color_names)
-sns.set_style("white")
-sns.set_context("paper")
-
-from hips.plotting.colormaps import gradient_cmap
+npr.seed(0)
 
 from pybasicbayes.util.text import progprint_xrange
 from pybasicbayes.models import FactorAnalysis
 from pybasicbayes.distributions import \
     Regression, Gaussian, DiagonalRegression, AutoRegression
 
-from pyhsmm.util.general import relabel_by_permutation
 from autoregressive.models import ARWeakLimitStickyHDPHMM
 from pyslds.util import get_empirical_ar_params
 from pylds.util import random_rotation
@@ -37,42 +17,26 @@ from pylds.util import random_rotation
 from pyslds.models import HMMSLDS
 from rslds.models import SoftmaxRecurrentOnlySLDS, SoftmaxRecurrentSLDS
 
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib.font_manager import FontProperties
+
+from rslds.plotting import plot_most_likely_dynamics, plot_trajectory, plot_z_samples, \
+    plot_data, plot_trajectory_and_probs, plot_all_dynamics
+
+from rslds.util import cached
+
 ### Global parameters
 T, K, K_true, D_obs, D_latent = 10000, 4, 4, 10, 2
 mask_start, mask_stop = 0, 0
 N_iters = 1000
 
 # Save / cache the outputs
-CACHE_RESULTS = True
 RUN_NUMBER = 1
 RESULTS_DIR = os.path.join("results", "nascar", "run{:03d}".format(RUN_NUMBER))
 
-### Helper functions
-def cached(results_name):
-    if CACHE_RESULTS:
-        def _cache(func):
-            def func_wrapper(*args, **kwargs):
-                results_file = os.path.join(RESULTS_DIR, results_name)
-                if not results_file.endswith(".pkl"):
-                    results_file += ".pkl"
-
-                if os.path.exists(results_file):
-                    with open(results_file, "rb") as f:
-                        results = pickle.load(f)
-                else:
-                    results = func(*args, **kwargs)
-                    with open(results_file, "wb") as f:
-                        pickle.dump(results, f)
-
-                return results
-            return func_wrapper
-    else:
-        _cache = lambda func: func
-
-    return _cache
 
 ### Plotting code
-
 def make_figure(true_model, z_true, x_true, y,
                 rslds, zs_rslds, x_rslds,
                 z_rslds_gen, x_rslds_gen, y_rslds_gen,
@@ -132,7 +96,7 @@ def make_figure(true_model, z_true, x_true, y,
 
     # Plot something... z samples?
     ax4 = fig.add_subplot(gs[1,1])
-    plot_z_samples(zs_rslds, zref=z_true, plt_slice=(0,1000), ax=ax4)
+    plot_z_samples(K, zs_rslds, zref=z_true, plt_slice=(0,1000), ax=ax4)
     ax4.set_title("Discrete State Samples")
     plt.figtext(.33 + .025, .5 - .075, '(d)', fontproperties=fp)
 
@@ -166,268 +130,8 @@ def make_figure(true_model, z_true, x_true, y,
     plt.show()
 
 
-def plot_dynamics(A, b=None, ax=None, plot_center=True,
-                  xlim=(-4,4), ylim=(-3,3), npts=20,
-                  color='r'):
-    b = np.zeros((A.shape[0], 1)) if b is None else b
-    x = np.linspace(*xlim, npts)
-    y = np.linspace(*ylim, npts)
-    X,Y = np.meshgrid(x,y)
-    xy = np.column_stack((X.ravel(), Y.ravel()))
-
-    # dydt_m = xy.dot(A.T) + b.T - xy
-    dydt_m = xy.dot(A.T) + b.T - xy
-
-    if ax is None:
-        fig = plt.figure(figsize=(6,6))
-        ax = fig.add_subplot(111)
-
-    ax.quiver(xy[:, 0], xy[:, 1],
-              dydt_m[:, 0], dydt_m[:, 1],
-              color=color, alpha=1.0,
-              headwidth=5.)
-
-    # Plot the stable point
-    if plot_center:
-        try:
-            center = -np.linalg.solve(A-np.eye(D_latent), b)
-            ax.plot(center[0], center[1], 'o', color=color, markersize=8)
-        except:
-            print("Dynamics are not invertible!")
-
-    ax.set_xlabel('$x_1$', fontsize=12, labelpad=10)
-    ax.set_ylabel('$x_2$', fontsize=12, labelpad=10)
-
-    return ax
-
-def plot_all_dynamics(dynamics_distns,
-                      filename=None):
-
-    fig = plt.figure(figsize=(12,3))
-    for k in range(K):
-        ax = fig.add_subplot(1,K,k+1)
-        plot_dynamics(dynamics_distns[k].A[:,:D_latent],
-                      b=dynamics_distns[k].A[:,D_latent:],
-                      plot_center=False,
-                      color=colors[k], ax=ax)
-
-    if filename is not None:
-        fig.savefig(os.path.join(RESULTS_DIR, filename))
-
-
-def plot_most_likely_dynamics(
-        reg, dynamics_distns,
-        xlim=(-4, 4), ylim=(-3, 3),  nxpts=20, nypts=10,
-        alpha=0.8,
-        ax=None, figsize=(3,3)):
-
-    x = np.linspace(*xlim, nxpts)
-    y = np.linspace(*ylim, nypts)
-    X, Y = np.meshgrid(x, y)
-    xy = np.column_stack((X.ravel(), Y.ravel()))
-
-    # Get the probability of each state at each xy location
-    Ts = reg.get_trans_matrices(xy)
-    prs = Ts[:,0,:]
-    z = np.argmax(prs, axis=1)
-
-
-    if ax is None:
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111)
-
-    for k in range(K):
-        A = dynamics_distns[k].A[:, :D_latent]
-        b = dynamics_distns[k].A[:, D_latent:]
-        dydt_m = xy.dot(A.T) + b.T - xy
-
-        zk = z == k
-        if zk.sum(0) > 0:
-            ax.quiver(xy[zk, 0], xy[zk, 1],
-                      dydt_m[zk, 0], dydt_m[zk, 1],
-                      color=colors[k], alpha=alpha)
-
-    ax.set_xlabel('$x_1$')
-    ax.set_ylabel('$x_2$')
-
-    plt.tight_layout()
-
-    return ax
-
-def plot_trans_probs(reg,
-                     xlim=(-4,4), ylim=(-3,3), n_pts=50,
-                     ax=None,
-                     filename=None):
-    XX,YY = np.meshgrid(np.linspace(*xlim,n_pts),
-                        np.linspace(*ylim,n_pts))
-    XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
-    test_prs = reg.get_trans_matrices(XY)[:,0,:]
-
-    if ax is None:
-        fig = plt.figure(figsize=(10,6))
-        ax = fig.add_subplot(111)
-
-    for k in range(K):
-        start = np.array([1., 1., 1., 0.])
-        end = np.concatenate((colors[k], [0.5]))
-        cmap = gradient_cmap([start, end])
-        im1 = ax.imshow(test_prs[:,k].reshape(*XX.shape),
-                         extent=xlim + tuple(reversed(ylim)),
-                         vmin=0, vmax=1, cmap=cmap)
-
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        # ax.set_title("State {}".format(k+1))
-
-    plt.tight_layout()
-    return ax
-
-def plot_trajectory(zhat, x, ax=None, ls="-", filename=None):
-    zcps = np.concatenate(([0], np.where(np.diff(zhat))[0] + 1, [zhat.size]))
-    if ax is None:
-        fig = plt.figure(figsize=(4, 4))
-        ax = fig.gca()
-    for start, stop in zip(zcps[:-1], zcps[1:]):
-        ax.plot(x[start:stop + 1, 0],
-                x[start:stop + 1, 1],
-                lw=1, ls=ls,
-                color=colors[zhat[start]],
-                alpha=1.0)
-
-    # ax.set_xlabel('$x_1$', fontsize=12, labelpad=10)
-    # ax.set_ylabel('$x_2$', fontsize=12, labelpad=10)
-    if filename is not None:
-        plt.savefig(filename)
-
-    return ax
-
-def plot_trajectory_and_probs(z, x,
-                              ax=None,
-                              trans_distn=None,
-                              title=None,
-                              filename=None,
-                              **trargs):
-    if ax is None:
-        fig = plt.figure(figsize=(10, 6))
-        ax = fig.add_subplot(111)
-
-    if trans_distn is not None:
-        xlim = abs(x[:, 0]).max()
-        xlim = (-xlim, xlim)
-        ylim = abs(x[:, 0]).max()
-        ylim = (-ylim, ylim)
-        ax = plot_trans_probs(trans_distn, ax=ax,
-                              xlim=xlim, ylim=ylim)
-    plot_trajectory(z, x, ax=ax, **trargs)
-    plt.tight_layout()
-    plt.title(title)
-    if filename is not None:
-        plt.savefig(os.path.join(RESULTS_DIR, filename))
-
-    return ax
-
-
-def plot_data(zhat, y, ax=None, ls="-", filename=None):
-    zcps = np.concatenate(([0], np.where(np.diff(zhat))[0] + 1, [zhat.size]))
-    if ax is None:
-        fig = plt.figure(figsize=(4, 4))
-        ax = fig.gca()
-    for start, stop in zip(zcps[:-1], zcps[1:]):
-        stop = min(y.shape[0], stop+1)
-        ax.plot(np.arange(start, stop),
-                y[start:stop ],
-                lw=1, ls=ls,
-                color=colors[zhat[start]],
-                alpha=1.0)
-
-    # ax.set_xlabel('$x_1$', fontsize=12, labelpad=10)
-    # ax.set_ylabel('$x_2$', fontsize=12, labelpad=10)
-    if filename is not None:
-        plt.savefig(filename)
-
-    return ax
-
-def plot_separate_trans_probs(reg,
-                              xlim=(-4,4), ylim=(-3,3), n_pts=100,
-                              ax=None,
-                              filename=None):
-    XX,YY = np.meshgrid(np.linspace(*xlim,n_pts),
-                        np.linspace(*ylim,n_pts))
-    XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
-
-    D_reg = reg.D_in
-    inputs = np.hstack((np.zeros((n_pts**2, D_reg-2)), XY))
-    test_prs = reg.pi(inputs)
-
-    if ax is None:
-        fig = plt.figure(figsize=(12,3))
-
-    for k in range(K):
-        ax = fig.add_subplot(1,K,k+1)
-        cmap = gradient_cmap([np.ones(3), colors[k]])
-        im1 = ax.imshow(test_prs[:,k].reshape(*XX.shape),
-                         extent=xlim + tuple(reversed(ylim)),
-                         vmin=0, vmax=1, cmap=cmap)
-
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.05)
-        plt.colorbar(im1, cax=cax, ax=ax)
-        # ax.set_title("State {}".format(k+1))
-
-    plt.tight_layout()
-    return ax
-
-
-def plot_z_samples(zs, zref=None,
-                   plt_slice=None,
-                   N_iters=None,
-                   title=None,
-                   ax=None,
-                   filename=None):
-
-    if ax is None:
-        fig = plt.figure(figsize=(10,5))
-        ax = fig.add_subplot(111)
-
-    zs = np.array(zs)
-    if plt_slice is None:
-        plt_slice = (0, zs.shape[1])
-    if N_iters is None:
-        N_iters = zs.shape[0]
-
-    im = ax.imshow(zs[:,slice(*plt_slice)], aspect='auto', vmin=0, vmax=K-1,
-                     cmap=gradient_cmap(colors[:K]), interpolation="nearest",
-                     extent=plt_slice + (N_iters, 0))
-    # ax.autoscale(False)
-    ax.set_xticks([])
-    # ax.set_yticks([0, N_iters])
-    ax.set_ylabel("Iteration")
-
-    if zref is not None:
-        divider = make_axes_locatable(ax)
-        ax2 = divider.append_axes("bottom", size="10%", pad=0.05)
-
-        zref = np.atleast_2d(zref)
-        im = ax2.imshow(zref[:, slice(*plt_slice)], aspect='auto', vmin=0, vmax=K-1,
-                         cmap=gradient_cmap(colors[:K]), interpolation="nearest")
-        # ax2.autoscale(False)
-        ax.set_xticks([])
-        ax2.set_yticks([])
-        ax2.set_ylabel("True $z$", rotation=0)
-        ax2.yaxis.set_label_coords(-.15, -.5)
-        ax2.set_xlabel("Time")
-
-    if title is not None:
-        ax.set_title(title)
-
-    if filename is not None:
-        plt.savefig(os.path.join(RESULTS_DIR, filename))
-
 ### Make an example with 2D latent states and 4 discrete states
-@cached("simulated_data")
+@cached(RESULTS_DIR, "simulated_data")
 def simulate_nascar():
     assert K_true == 4
     As = [random_rotation(D_latent, np.pi/24.),
@@ -508,7 +212,7 @@ def simulate_nascar():
     return model, inputs, z, x, y, mask
 
 ### Factor Analysis and PCA for dimensionality reduction
-@cached("factor_analysis")
+@cached(RESULTS_DIR, "factor_analysis")
 def fit_factor_analysis(y, mask=None, N_iters=100):
     print("Fitting Factor Analysis")
     model = FactorAnalysis(D_obs, D_latent)
@@ -525,7 +229,7 @@ def fit_factor_analysis(y, mask=None, N_iters=100):
     C_init = np.column_stack((model.W, b))
     return data.Z, C_init
 
-@cached("pca")
+@cached(RESULTS_DIR, "pca")
 def fit_pca(y, whiten=True):
     print("Fitting PCA")
     from sklearn.decomposition import PCA
@@ -543,7 +247,7 @@ def fit_pca(y, whiten=True):
     return x_init, np.column_stack((C_init, b_init))
 
 ### Make an ARHMM for initialization
-@cached("arhmm")
+@cached(RESULTS_DIR, "arhmm")
 def fit_arhmm(x, affine=True):
     print("Fitting Sticky ARHMM")
     dynamics_hypparams = \
@@ -622,7 +326,7 @@ def make_rslds_parameters(C_init):
     return init_dynamics_distns, dynamics_distns, emission_distns
 
 
-@cached("slds")
+@cached(RESULTS_DIR, "slds")
 def fit_slds(inputs, z_init, x_init, y, mask, C_init,
               N_iters=1000):
     print("Fitting standard SLDS")
@@ -661,57 +365,8 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
 
     return slds, lps, z_smpls, x_test
 
-# @cached("rslds")
-def fit_rslds(inputs, z_init, x_init, y, mask, C_init,
-              true_model=None, initialization="none", N_iters=10000):
-    print("Fitting rSLDS")
-    init_dynamics_distns, dynamics_distns, emission_distns = \
-        make_rslds_parameters(C_init)
 
-    rslds = SoftmaxRecurrentOnlySLDS(
-        init_state_distn='uniform',
-        init_dynamics_distns=init_dynamics_distns,
-        dynamics_distns=dynamics_distns,
-        emission_distns=emission_distns,
-        fixed_emission=False,
-        alpha=3.)
-
-    rslds.add_data(y, inputs=inputs, mask=mask)
-
-    # Initialize dynamics
-    # print("Initializing dynamics with Gibbs sampling")
-    for _ in progprint_xrange(100):
-        rslds.resample_dynamics_distns()
-        rslds.resample_trans_distn()
-        rslds.resample_emission_distns()
-
-    # if true_model is not None:
-    #     rslds.trans_distn.W = true_model.trans_distn.W.copy()
-    #     rslds.trans_distn.b = true_model.trans_distn.b.copy()
-    #     for rdd, tdd in zip(rslds.dynamics_distns, true_model.dynamics_distns):
-    #         rdd.A = tdd.A.copy()
-    #         rdd.sigma = tdd.sigma.copy()
-    #     rslds.emission_distns[0].A = true_model.emission_distns[0].A.copy()
-    #     rslds.emission_distns[0].sigmasq_flat = true_model.emission_distns[0].sigmasq_flat.copy()
-
-    # Fit the model
-    lps = []
-    z_smpls = []
-    for _ in progprint_xrange(N_iters):
-        rslds.resample_model()
-        lps.append(rslds.log_likelihood())
-        z_smpls.append(rslds.stateseqs[0].copy())
-
-    x_test = rslds.states_list[0].gaussian_states
-    z_smpls = np.array(z_smpls)
-    lps = np.array(lps)
-
-    print("Inf W_markov:\n{}".format(rslds.trans_distn.logpi))
-    print("Inf W_input:\n{}".format(rslds.trans_distn.W))
-
-    return rslds, lps, z_smpls, x_test
-
-# @cached("rslds_variational")
+# @cached(RESULTS_DIR, "rslds_variational")
 def fit_rslds_variational(
         inputs, y, mask,
         x_init=None, z_init=None, C_init=None, initialization="none",
@@ -783,8 +438,7 @@ def fit_rslds_variational(
     return rslds, vlbs, z_smpls, x_smpl
 
 
-
-# @cached("rslds_vbem")
+# @cached(RESULTS_DIR, "rslds_vbem")
 def fit_rslds_vbem(
         inputs, y, mask,
         x_init=None, z_init=None, C_init=None, initialization="none",
@@ -891,7 +545,7 @@ if __name__ == "__main__":
         fit_rslds_vbem(inputs, y, mask,
                        z_init=z_init, x_init=x_init, C_init=C_init,
                        initialization="given",
-                       true_model=true_model, N_iters=100)
+                       true_model=true_model, N_iters=500)
 
     # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
     #     fit_rslds_vbem(inputs, y, mask,
@@ -901,14 +555,11 @@ if __name__ == "__main__":
     plot_trajectory_and_probs(
         rslds_z_smpls[-1][1:], rslds_x[1:],
         trans_distn=rslds.trans_distn,
-        title="Recurrent SLDS",
-        filename="rslds.png")
+        title="Recurrent SLDS")
 
     plot_all_dynamics(rslds.dynamics_distns)
 
-    plot_z_samples(rslds_z_smpls,
-                   plt_slice=(0,1000),
-                   filename="rslds_zsamples.png")
+    plot_z_samples(K, rslds_z_smpls, plt_slice=(0,1000))
 
     ## Generate from the model
     T_gen = 2000
@@ -923,5 +574,10 @@ if __name__ == "__main__":
                 slds, slds_z_smpls, slds_x,
                 slds_z_gen, slds_x_gen, slds_y_gen,
                 )
+
+    plt.figure()
+    plt.plot(rslds_lps)
+    plt.xlabel("Iteration")
+    plt.ylabel("ELBO")
 
     plt.show()

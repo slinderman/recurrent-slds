@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 
 from scipy.special import beta
@@ -183,3 +186,24 @@ def inhmm_entropy(params, stats):
     neg_entropy += np.sum(E_ztztp1T * log_transmatrices)
     neg_entropy -= log_Z
     return -neg_entropy
+
+
+def cached(results_dir, results_name):
+    def _cache(func):
+        def func_wrapper(*args, **kwargs):
+            results_file = os.path.join(results_dir, results_name)
+            if not results_file.endswith(".pkl"):
+                results_file += ".pkl"
+
+            if os.path.exists(results_file):
+                with open(results_file, "rb") as f:
+                    results = pickle.load(f)
+            else:
+                results = func(*args, **kwargs)
+                with open(results_file, "wb") as f:
+                    pickle.dump(results, f)
+
+            return results
+        return func_wrapper
+
+    return _cache
