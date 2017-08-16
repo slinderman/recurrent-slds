@@ -651,6 +651,12 @@ class _SoftmaxRecurrentSLDSStatesVBEM(_SoftmaxRecurrentSLDSStatesBase):
         elp += np.sum(self.expected_states * self.vbem_aBl)
         return elp
 
+    def _init_vbem_from_gibbs(self):
+        super(_SoftmaxRecurrentSLDSStatesBase, self)._init_mf_from_gibbs()
+        self.vbem_update_auxiliary_vars()
+        self.expected_joints = self.expected_states[:-1, :, None] * self.expected_states[1:, None, :]
+        self._set_expected_trans_stats()
+
 
 class SoftmaxRecurrentSLDSStates(_SoftmaxRecurrentSLDSStatesVBEM,
                                  _SoftmaxRecurrentSLDSStatesMeanField):

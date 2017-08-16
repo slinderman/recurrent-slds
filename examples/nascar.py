@@ -515,7 +515,7 @@ def simulate_nascar():
     # Sample from the model #
     #########################
     inputs = np.ones((T, 1))
-    (y, x), z = model.generate(T=T, inputs=inputs)
+    y, x, z = model.generate(T=T, inputs=inputs)
 
     # Maks off some data
     mask = np.ones((T,D_obs), dtype=bool)
@@ -941,7 +941,7 @@ if __name__ == "__main__":
     ## Generate from the model
     T_gen = 2000
     inputs = np.ones((T_gen, 1))
-    (iorslds_y_gen, iorslds_x_gen), iorslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
+    iorslds_y_gen, iorslds_x_gen, iorslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
     slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
 
     make_figure(true_model, z_true, x_true, y,

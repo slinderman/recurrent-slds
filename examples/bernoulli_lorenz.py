@@ -880,7 +880,7 @@ def run_ppc_on_probs(statistic, p, models,
         print("Testing model {}".format(model))
         test_s = []
         for _ in progprint_xrange(N_iter):
-            (_, x_gen), _ = model.generate(T=T_gen, inputs=inputs, with_noise=True)
+            _, x_gen, _ = model.generate(T=T_gen, inputs=inputs, with_noise=True)
             # x_gen = x_gen[200:]
 
             psi_gen = x_gen.dot(model.emission_distns[0].A[:, :D_latent].T) + \
@@ -950,7 +950,7 @@ if __name__ == "__main__":
     ## Generate from the model
     T_gen = 10000
     inputs = np.ones((T_gen, 1))
-    (rslds_y_gen, rslds_x_gen), rslds_z_gen = test_model.generate(T=T_gen, inputs=inputs, with_noise=True)
+    rslds_y_gen, rslds_x_gen, rslds_z_gen = test_model.generate(T=T_gen, inputs=inputs, with_noise=True)
     rslds_psi_gen = rslds_x_gen.dot(test_model.emission_distns[0].A[:, :D_latent].T) + \
                     test_model.emission_distns[0].A[:, D_latent] + \
                     test_model.emission_distns[0].b.T

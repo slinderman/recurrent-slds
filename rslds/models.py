@@ -241,7 +241,7 @@ class _RecurrentSLDSBase(object):
         data = self._generate_obs(s, with_noise=with_noise)
         if keep:
             self.states_list.append(s)
-        return data, s.stateseq
+        return data + (s.stateseq,)
 
     def _generate_obs(self, s, with_noise=True):
         if s.data is None:
@@ -291,18 +291,15 @@ class SoftmaxRecurrentSLDS(_RecurrentSLDSBase, _SLDSMeanFieldMixin, _SLDSVBEMMix
     _trans_class = transitions.SoftmaxInputHMMTransitions
 
     def _M_step_trans_distn(self):
-        # self.trans_distn.max_likelihood(
-        #         expected_stateseqs=[s.expected_states for s in self.states_list],
-        #         expected_covseqs=[s.smoothed_mus[:-1] for s in self.states_list])
-        sum_tuples = lambda lst: list(map(sum, zip(*lst)))
+        stack_tuples = lambda lst: list(map(lambda xs: np.concatenate(xs, axis=0), zip(*lst)))
         self.trans_distn.max_likelihood(
-            stats=sum_tuples([s.E_trans_stats for s in self.states_list]))
+            stats=stack_tuples([s.E_trans_stats for s in self.states_list]))
 
     def meanfield_update_trans_distn(self):
-        # Include the auxiliar variables of the lower bound
-        sum_tuples = lambda lst: list(map(sum, zip(*lst)))
+        # Include the auxiliary variables of the lower bound
+        stack_tuples = lambda lst: list(map(lambda xs: np.concatenate(xs, axis=0), zip(*lst)))
         self.trans_distn.meanfieldupdate(
-            stats=sum_tuples([s.E_trans_stats for s in self.states_list]))
+            stats=stack_tuples([s.E_trans_stats for s in self.states_list]))
 
     def _init_mf_from_gibbs(self):
         self.trans_distn._initialize_mean_field()
