@@ -159,7 +159,7 @@ import autograd.numpy as anp
 import autograd.scipy.misc as amisc
 from autograd import grad
 
-class SoftmaxInputHMMTransitions(object):
+class _SoftmaxInputHMMTransitionsBase(object):
     """
     Like above but with a softmax transition model.
 
@@ -192,26 +192,31 @@ class SoftmaxInputHMMTransitions(object):
         else:
             self.W = np.zeros((covariate_dim, num_states))
 
-        # Assume diagonal prior on vec(W)
-        # self.mu_W = mu_W * anp.ones((covariate_dim, num_states))
-        # self.sigmasq_W = sigmasq_W * anp.ones((covariate_dim, num_states))
-
         mu_0 = np.zeros(self.D_in) if mu_0 is None else mu_0
-        Sigma_0 = np.eye(self.D_in) if Sigma_0 is None else Sigma_0
+        Sigma_0 = 10000. * np.eye(self.D_in) if Sigma_0 is None else Sigma_0
         assert mu_0.shape == (self.D_in,)
         assert Sigma_0.shape == (self.D_in, self.D_in)
         self.h_0 = np.linalg.solve(Sigma_0, mu_0)
         self.J_0 = np.linalg.inv(Sigma_0)
 
-        # HMC params
-        self.step_sz = 0.01
-        self.accept_rate = 0.9
-        self.target_accept_rate = 0.9
+    def log_prior(self):
+        # Normal N(mu | mu_0, Sigma / kappa_0)
+        from scipy.linalg import solve_triangular
+        sigma = np.linalg.inv(self.J_0)
+        mu = sigma.dot(self.h_0)
+        S_chol = np.linalg.cholesky(sigma)
 
-        # Mean field natural parameters
-        self.mf_J = np.array([self.J_0.copy() for _ in range(self.D_out)])
-        self.mf_h = np.array([self.h_0.copy() for Jd in self.mf_J])
-        self._mf_Sigma = self._mf_mu = self._mf_mumuT = None
+        # Stack log pi and W
+        X = np.vstack((self.logpi, self.W)).T
+
+        lp = 0
+        for d in range(self.D_out):
+            x = solve_triangular(S_chol, X[d] - mu, lower=True)
+            lp += -1. / 2. * np.dot(x, x) \
+                  - self.D_in / 2 * np.log(2 * np.pi) \
+                  - np.log(S_chol.diagonal()).sum()
+
+        return lp
 
     ### HMC
     def get_log_trans_matrices(self, X):
@@ -243,6 +248,51 @@ class SoftmaxInputHMMTransitions(object):
         log_trans_matrices = self.get_log_trans_matrices(X)
         return np.exp(log_trans_matrices)
 
+    def initialize_with_logistic_regression(self, zs, xs):
+        from sklearn.linear_model.logistic import LogisticRegression
+        lr = LogisticRegression(verbose=False, multi_class="multinomial", solver="lbfgs")
+
+        # Make the covariates
+        K, D = self.num_states, self.covariate_dim
+
+        # Split zs into prevs and nexts
+        zps = zs[:-1] if isinstance(zs, np.ndarray) else np.concatenate([z[:-1] for z in zs], axis=0)
+        zns = zs[1:] if isinstance(zs, np.ndarray) else np.concatenate([z[1:] for z in zs], axis=0)
+        xps = xs[:-1] if isinstance(xs, np.ndarray) else np.concatenate([x[:-1] for x in xs], axis=0)
+
+        assert zps.shape[0] == xps.shape[0]
+        assert zps.ndim == 1 and zps.dtype == np.int32 and zps.min() >= 0 and zps.max() < K
+        assert zns.ndim == 1 and zns.dtype == np.int32 and zns.min() >= 0 and zns.max() < K
+        assert xps.ndim == 2 and xps.shape[1] == D
+
+        lr_X = np.column_stack((one_hot(zps, K), xps))
+        lr_y = zns
+        lr.fit(lr_X, lr_y)
+
+        # Now convert the logistic regression into weights
+        used = np.bincount(zns, minlength=K) > 0
+        self.W = np.zeros((D, K))
+        self.W[:, used] = lr.coef_[:, K:].T
+        self.logpi = np.zeros((K, K))
+        self.logpi[:, used] = lr.coef_[:, :K].T
+        self.logpi[:, used] += lr.intercept_[None, :]
+        self.logpi[:, ~used] += -100.
+
+
+class _SoftmaxInputHMMTransitionsHMC(_SoftmaxInputHMMTransitionsBase):
+    def __init__(self, num_states, covariate_dim,
+                 mu_0=None, Sigma_0=None,
+                 logpi=None, W=None):
+
+        super(_SoftmaxInputHMMTransitionsHMC, self).__init__(
+            num_states, covariate_dim,
+            mu_0=mu_0, Sigma_0=Sigma_0, logpi=logpi, W=W)
+
+        # HMC params
+        self.step_sz = 0.01
+        self.accept_rate = 0.9
+        self.target_accept_rate = 0.9
+
     def joint_log_probability(self, logpi, W, stateseqs, covseqs):
         K, D = self.num_states, self.covariate_dim
 
@@ -264,7 +314,7 @@ class SoftmaxInputHMMTransitions(object):
 
         return ll
 
-    def resample(self, stateseqs=None, covseqs=None,
+    def resample_hmc(self, stateseqs=None, covseqs=None,
                  n_steps=10, **kwargs):
         K, D = self.num_states, self.covariate_dim
 
@@ -288,6 +338,45 @@ class SoftmaxInputHMMTransitions(object):
 
         self.logpi = xf[:K**2].reshape((K, K))
         self.W = xf[K**2:].reshape((D, K))
+
+
+class _SoftmaxInputHMMTransitionsEM(_SoftmaxInputHMMTransitionsBase):
+
+    def max_likelihood(self, stats):
+        """
+        Update the expected transition matrix with a bunch of stats
+        :param stats: E_zp1_uT, E_uuT, E_u, a, lambda_bs from the states model
+        :param prob: minibatch probability
+        :param stepsize: svi step size
+        """
+        K, D = self.num_states, self.covariate_dim
+        E_u_zp1T, E_uuT, E_u, a, lambda_bs = stats
+
+        # Update statistics each row of A
+        for k in range(self.D_out):
+            # Jk = self.J_0 + 2 * lambda_bs[:,k][:,None,None] * E_uuT
+            Jk = self.J_0 + 2 * np.einsum('t, tij -> ij', lambda_bs[:, k], E_uuT)
+            hk = self.h_0 + E_u_zp1T[:, :, k].sum(0)
+            hk -= np.einsum('t, ti -> i', (0.5 - 2 * lambda_bs[:, k] * a), E_u)
+
+            # Update the mean field natural parameters
+            ak = np.linalg.solve(Jk, hk)
+            self.logpi[:,k] = ak[:K]
+            self.W[:,k] = ak[K:]
+
+
+class _SoftmaxInputHMMTransitionsMeanField(_SoftmaxInputHMMTransitionsBase):
+    def __init__(self, num_states, covariate_dim,
+                 mu_0=None, Sigma_0=None,
+                 logpi=None, W=None):
+        super(_SoftmaxInputHMMTransitionsMeanField, self).__init__(
+            num_states, covariate_dim,
+            mu_0=mu_0, Sigma_0=Sigma_0, logpi=logpi, W=W)
+
+        # Mean field natural parameters
+        self.mf_J = np.array([self.J_0.copy() for _ in range(self.D_out)])
+        self.mf_h = np.array([self.h_0.copy() for Jd in self.mf_J])
+        self._mf_Sigma = self._mf_mu = self._mf_mumuT = None
 
     ### Mean field
     @property
@@ -367,6 +456,12 @@ class SoftmaxInputHMMTransitions(object):
         self._set_standard_expectations()
 
 
+class SoftmaxInputHMMTransitions(_SoftmaxInputHMMTransitionsHMC,
+                                 _SoftmaxInputHMMTransitionsEM,
+                                 _SoftmaxInputHMMTransitionsMeanField):
+    pass
+
+
 class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
     """
     Like above but with logpi constant for all rows (prev states)
@@ -436,6 +531,48 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
 
         self.b = xf[:K]
         self.W = xf[K:].reshape((D, K))
+
+    ### EM
+    def max_likelihood(self, stats):
+        """
+        Update the expected transition matrix with a bunch of stats
+        :param stats: E_zp1_uT, E_uuT, E_u, a, lambda_bs from the states model
+        :param prob: minibatch probability
+        :param stepsize: svi step size
+        """
+        K, D = self.num_states, self.covariate_dim
+        E_u_zp1T, E_uuT, E_u, a, lambda_bs = stats
+        T = E_u.shape[0]
+
+        # Remember u = [z, x]
+        # Combine statistics across all preceding states, z,
+        # to get statistics of shape (1+covariate_dim)
+        E_u_zp1T_new = np.zeros((T, 1+D, K))
+        E_u_zp1T_new[:, 0, :] = E_u_zp1T[:, :K, :].sum(axis=1)
+        E_u_zp1T_new[:, 1:, :] = E_u_zp1T[:, K:, :]
+        E_u_zp1T = E_u_zp1T_new
+
+        E_uuT_new = np.zeros((T, 1+D, 1+D))
+        E_uuT_new[:,0,0] = E_uuT[:, :K, :K].sum(axis=(1,2))
+        E_uuT_new[:,0,1:] = E_uuT[:, :K, K:].sum(axis=1)
+        E_uuT_new[:,1:,0] = E_uuT[:, K:, :K].sum(axis=2)
+        E_uuT_new[:,1:,1:] = E_uuT[:, K:, K:]
+        E_uuT = E_uuT_new
+
+        E_u_new = np.zeros((T, 1+D))
+        E_u_new[:,0] = E_u[:, :K].sum(axis=1)
+        E_u_new[:,1:] = E_u[:, K:]
+        E_u = E_u_new
+
+        # Update statistics each row of A
+        for k in range(self.D_out):
+            Jk = self.J_0 + 2 * np.einsum('t, tij -> ij', lambda_bs[:, k], E_uuT)
+            hk = self.h_0 + E_u_zp1T[:, :, k].sum(0)
+            hk -= np.einsum('t, ti -> i', (0.5 - 2 * lambda_bs[:, k] * a), E_u)
+
+            ak = np.linalg.solve(Jk, hk)
+            self.logpi[:, k] = ak[0]
+            self.W[:, k] = ak[1:]
 
     ### Mean field
     @property
@@ -536,3 +673,29 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
         A = np.hstack((self.b[:,None], self.W.T))
         self.mf_h = np.array([Jk.dot(ak) for Jk, ak in zip(self.mf_J, A)])
         self._set_standard_expectations()
+
+    def initialize_with_logistic_regression(self, zs, xs):
+        from sklearn.linear_model.logistic import LogisticRegression
+        lr = LogisticRegression(verbose=False, multi_class="multinomial", solver="lbfgs")
+
+        # Make the covariates
+        K, D = self.num_states, self.covariate_dim
+        zs = zs if isinstance(zs, np.ndarray) else np.concatenate(zs, axis=0)
+        xs = xs if isinstance(xs, np.ndarray) else np.concatenate(xs, axis=0)
+        assert zs.shape[0] == xs.shape[0]
+        assert zs.ndim == 1 and zs.dtype == np.int32 and zs.min() >= 0 and zs.max() < K
+        assert xs.ndim == 2 and xs.shape[1] == D
+
+        lr_X = xs[:-1]
+        lr_y = zs[1:]
+        lr.fit(lr_X, lr_y)
+
+        # Now convert the logistic regression into weights
+        used = np.bincount(zs, minlength=K) > 0
+        self.W = np.zeros((D, K))
+        self.W[:, used] = lr.coef_.T
+        b = np.zeros((K,))
+        b[used] += lr.intercept_
+        b[~used] += -100.
+        self.b = b
+

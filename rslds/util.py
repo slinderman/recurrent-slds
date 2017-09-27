@@ -1,3 +1,6 @@
+import os
+import pickle
+
 import numpy as np
 
 from scipy.special import beta
@@ -169,3 +172,38 @@ def get_density(alpha_k, alpha_rest):
         return logistic(psi)**alpha_k * logistic(-psi)**alpha_rest \
             / beta(alpha_k,alpha_rest)
     return density
+
+def inhmm_entropy(params, stats):
+    log_transmatrices, log_pi_0, aBl, _ = params
+    E_z, E_ztztp1T, log_Z = stats
+    T, K = E_z.shape
+    assert aBl.shape == (T, K)
+    assert E_ztztp1T.shape == (T - 1, K, K)
+    assert log_transmatrices.shape == (T - 1, K, K)
+
+    neg_entropy = np.sum(E_z[0] * log_pi_0)
+    neg_entropy += np.sum(E_z * aBl)
+    neg_entropy += np.sum(E_ztztp1T * log_transmatrices)
+    neg_entropy -= log_Z
+    return -neg_entropy
+
+
+def cached(results_dir, results_name):
+    def _cache(func):
+        def func_wrapper(*args, **kwargs):
+            results_file = os.path.join(results_dir, results_name)
+            if not results_file.endswith(".pkl"):
+                results_file += ".pkl"
+
+            if os.path.exists(results_file):
+                with open(results_file, "rb") as f:
+                    results = pickle.load(f)
+            else:
+                results = func(*args, **kwargs)
+                with open(results_file, "wb") as f:
+                    pickle.dump(results, f)
+
+            return results
+        return func_wrapper
+
+    return _cache

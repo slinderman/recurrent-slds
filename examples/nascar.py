@@ -38,8 +38,8 @@ from pypolyagamma.distributions import MultinomialRegression
 from pyslds.models import HMMSLDS
 
 from rslds.decision_list import DecisionList
-from rslds.rslds import RecurrentSLDS, StickyRecurrentSLDS, \
-    RecurrentOnlySLDS, StickyRecurrentOnlySLDS
+from rslds.models import PGRecurrentSLDS, StickyPGRecurrentSLDS, \
+    PGRecurrentOnlySLDS, StickyPGRecurrentOnlySLDS
 from rslds.util import compute_psi_cmoments
 
 ### Global parameters
@@ -495,14 +495,13 @@ def simulate_nascar():
             sigma=1e-3 * np.eye(D_latent))
         for _ in range(K)]
 
-    # C = np.hstack((np.eye(D_latent), np.zeros((D_obs, 1))))
     C = np.hstack((npr.randn(D_obs, D_latent), np.zeros((D_obs, 1))))
     emission_distns = \
         DiagonalRegression(D_obs, D_latent+1,
                            A=C, sigmasq=1e-5 *np.ones(D_obs),
                            alpha_0=2.0, beta_0=2.0)
 
-    model = RecurrentSLDS(
+    model = PGRecurrentSLDS(
         trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
                           sigmasq_A=100., sigmasq_b=100.),
         init_state_distn='uniform',
@@ -515,7 +514,7 @@ def simulate_nascar():
     # Sample from the model #
     #########################
     inputs = np.ones((T, 1))
-    (y, x), z = model.generate(T=T, inputs=inputs)
+    y, x, z = model.generate(T=T, inputs=inputs)
 
     # Maks off some data
     mask = np.ones((T,D_obs), dtype=bool)
@@ -529,7 +528,7 @@ def simulate_nascar():
     return model, inputs, z, x, y, mask
 
 ### Factor Analysis and PCA for dimensionality reduction
-@cached("factor_analysis")
+# @cached("factor_analysis")
 def fit_factor_analysis(y, mask=None, N_iters=100):
     print("Fitting Factor Analysis")
     model = FactorAnalysis(D_obs, D_latent)
@@ -546,7 +545,7 @@ def fit_factor_analysis(y, mask=None, N_iters=100):
     C_init = np.column_stack((model.W, b))
     return data.Z, C_init
 
-@cached("pca")
+# @cached("pca")
 def fit_pca(y, whiten=True):
     print("Fitting PCA")
     from sklearn.decomposition import PCA
@@ -564,7 +563,7 @@ def fit_pca(y, whiten=True):
     return x_init, np.column_stack((C_init, b_init))
 
 ### Make an ARHMM for initialization
-@cached("arhmm")
+# @cached("arhmm")
 def fit_arhmm(x, affine=True):
     print("Fitting Sticky ARHMM")
     dynamics_hypparams = \
@@ -648,7 +647,7 @@ def make_rslds_parameters(C_init):
     return init_dynamics_distns, dynamics_distns, emission_distns
 
 
-@cached("slds")
+# @cached("slds")
 def fit_slds(inputs, z_init, x_init, y, mask, C_init,
               N_iters=10000):
     print("Fitting standard SLDS")
@@ -687,14 +686,14 @@ def fit_slds(inputs, z_init, x_init, y, mask, C_init,
 
     return slds, lps, z_smpls, x_test
 
-@cached("rslds")
+# @cached("rslds")
 def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
               N_iters=10000):
     print("Fitting rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = RecurrentSLDS(
+    rslds = PGRecurrentSLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -734,14 +733,14 @@ def fit_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     return rslds, lps, z_smpls, x_test
 
 
-@cached("sticky_rslds")
+# @cached("sticky_rslds")
 def fit_sticky_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
                      N_iters=10000):
     print("Fitting Sticky rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyRecurrentSLDS(
+    rslds = StickyPGRecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000., kappa=100.,
                           A=np.hstack((np.zeros((K - 1, K)), dl_reg.A)),
@@ -781,14 +780,14 @@ def fit_sticky_rslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
 
     return rslds, lps, z_smpls, x_test
 
-@cached("roslds")
+# @cached("roslds")
 def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
                N_iters=10000):
     print("Fitting input only rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = RecurrentOnlySLDS(
+    rslds = PGRecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
                           b=dl_reg.b),
@@ -827,14 +826,14 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
     return rslds, lps, z_smpls, x_test
 
 
-@cached("sticky_roslds")
+# @cached("sticky_roslds")
 def fit_sticky_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
                       N_iters=10000):
     print("Fitting sticky input only rSLDS")
     init_dynamics_distns, dynamics_distns, emission_distns = \
         make_rslds_parameters(C_init)
 
-    rslds = StickyRecurrentOnlySLDS(
+    rslds = StickyPGRecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
                           kappa=1., sigmasq_kappa=1.0,
                           A=np.hstack((np.zeros((K-1, K)), dl_reg.A)),
@@ -890,16 +889,14 @@ if __name__ == "__main__":
     x_init, C_init = fit_pca(y)
 
     ## Fit an ARHMM for initialization
-    #  TODO: This is still a bit ugly...
-    #  basically, we're only fitting on data that was observed
+    #  Basically, we're only fitting on data that was observed
     good_inds = np.all(mask, axis=1)
     good_x_init = x_init[good_inds]
     arhmm, good_z_init = fit_arhmm(good_x_init)
     z_init = np.random.randint(0,K,size=T)
     z_init[good_inds] = good_z_init
     z_init[mask_start:mask_stop] = z_init[mask_start-1]
-
-    # Test: Zero out missing data
+    # Zero out missing data
     x_init[~good_inds] = 0
 
     # plot_trajectory_and_probs(
@@ -938,15 +935,20 @@ if __name__ == "__main__":
     roslds, roslds_lps, roslds_z_smpls, roslds_x = \
         fit_roslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init, N_iters=N_samples)
 
+    plot_trajectory_and_probs(
+        roslds_z_smpls[-1][1:], roslds_x[1:],
+        trans_distn=roslds.trans_distn,
+        title="Recurrent SLDS")
+
     ## Generate from the model
     T_gen = 2000
     inputs = np.ones((T_gen, 1))
-    (iorslds_y_gen, iorslds_x_gen), iorslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
+    roslds_y_gen, roslds_x_gen, roslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
     slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
 
     make_figure(true_model, z_true, x_true, y,
                 roslds, roslds_z_smpls, roslds_x,
-                iorslds_z_gen, iorslds_x_gen, iorslds_y_gen,
+                roslds_z_gen, roslds_x_gen, roslds_y_gen,
                 slds, slds_z_smpls, slds_x,
                 slds_z_gen, slds_x_gen, slds_y_gen,
                 )

@@ -27,7 +27,7 @@ from pybasicbayes.distributions import \
     Regression, Gaussian, DiagonalRegression
 
 from pgmult.utils import compute_psi_cmoments
-from rslds.rslds import RecurrentSLDS
+from rslds.rslds import PGRecurrentSLDS
 
 ### Global parameters
 T, K, K_true, D_obs, D_latent = 200, 5, 5, 2, 2
@@ -395,7 +395,7 @@ def simulate_prior():
         DiagonalRegression(D_obs, D_latent+1,
                            alpha_0=2.0, beta_0=2.0)
 
-    model = RecurrentSLDS(
+    model = PGRecurrentSLDS(
         D_in=D_latent,
         trans_params=dict(sigmasq_A=10., sigmasq_b=0.01),
         init_state_distn='uniform',
@@ -442,6 +442,6 @@ if __name__ == "__main__":
         xs.append(x[1:])
 
     make_figure(true_model)
-    # make_extended_figure(true_model, zs, xs)
-    # make_nonlinear_figure(true_model)
+    make_extended_figure(true_model, zs, xs)
+    make_nonlinear_figure(true_model)
     plt.show()
