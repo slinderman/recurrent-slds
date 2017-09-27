@@ -62,7 +62,7 @@ class _RecurrentSLDSStatesBase(object):
     def trans_distn(self):
         return self.model.trans_distn
 
-    def generate_states(self, with_noise=True):
+    def generate_states(self, initial_condition=None, with_noise=True):
         """
         Jointly sample the discrete and continuous states
         """
@@ -71,12 +71,16 @@ class _RecurrentSLDSStatesBase(object):
         T, K, n = self.T, self.num_states, self.D_latent
 
         # Initialize discrete state sequence
-        init_state_distn = np.ones(self.num_states) / float(self.num_states)
         dss = np.empty(T, dtype=np.int32)
-        dss[0] = sample_discrete(init_state_distn.ravel())
-
         gss = np.empty((T,n), dtype='double')
-        gss[0] = self.init_dynamics_distns[dss[0]].rvs()
+
+        if initial_condition is None:
+            init_state_distn = np.ones(self.num_states) / float(self.num_states)
+            dss[0] = sample_discrete(init_state_distn.ravel())
+            gss[0] = self.init_dynamics_distns[dss[0]].rvs()
+        else:
+            dss[0] = initial_condition[0]
+            gss[0] = initial_condition[1]
 
         for t in range(1,T):
             # Sample discrete state given previous continuous state
@@ -85,13 +89,13 @@ class _RecurrentSLDSStatesBase(object):
                 # Sample discrete state from recurrent transition matrix
                 dss[t] = sample_discrete(A[dss[t-1], :])
                 # Sample continuous state given current discrete state
-                gss[t] = self.dynamics_distns[dss[t]].\
+                gss[t] = self.dynamics_distns[dss[t-1]].\
                     rvs(x=np.hstack((gss[t-1][None,:], self.inputs[t-1][None,:])),
                         return_xy=False)
             else:
                 # Pick the most likely next discrete state and continuous state
                 dss[t] = np.argmax(A[dss[t-1], :])
-                gss[t] = self.dynamics_distns[dss[t]]. \
+                gss[t] = self.dynamics_distns[dss[t-1]]. \
                     predict(np.hstack((gss[t-1][None,:], self.inputs[t-1][None,:])))
             assert np.all(np.isfinite(gss[t])), "SLDS appears to be unstable!"
 

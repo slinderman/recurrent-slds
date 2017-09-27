@@ -16,7 +16,7 @@ from hips.plotting.colormaps import gradient_cmap
 cmap = gradient_cmap(colors)
 
 from pybasicbayes.distributions import Gaussian
-from rslds.models import InputHMM, SoftmaxInputHMM, SoftmaxInputOnlyHMM
+from rslds.models import InputHMM
 
 
 #################################################
@@ -43,7 +43,6 @@ true_model = \
 
 # Set the weights by hand such that they primarily
 # depend on the input
-true_model.trans_distn.A[0][:Nmax] = 0
 true_model.trans_distn.A[0][Nmax:] = [ 5.,  5.]
 # true_model.trans_distn.A[1][Nmax:] = [-2.,  2.]
 # true_model.trans_distn.A[2][Nmax:] = [-2., -2.]
@@ -55,9 +54,10 @@ dataset = [true_model.generate(T, covariates=covariate_seq[:,:D_in]) for _ in ra
 # Generate inference test model - initialized randomly #
 ########################################################
 test_model = \
-    SoftmaxInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
-                    init_state_concentration=1.0,
-                    D_in=D_in,)
+    InputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
+             init_state_concentration=1.0,
+             D_in=D_in,
+             trans_params=dict(sigmasq_b=0.001))
 
 for (obs, covs), _ in dataset:
     test_model.add_data(data=obs, covariates=covs[:,:D_in])
@@ -65,15 +65,13 @@ for (obs, covs), _ in dataset:
 # run sampler
 print("io hmm sampling")
 num_iter = 200
-W_smpls = np.zeros((num_iter,) + test_model.trans_distn.W.shape)
+A_smpls = np.zeros((num_iter,) + test_model.trans_distn.A.shape)
 z_smpls = np.zeros((num_iter, T))
-import ipdb; ipdb.set_trace()
 for itr in range(num_iter):
-    # test_model.resample_model()
-    test_model.EM_step()
+    test_model.resample_model(num_procs=0)
     if itr % 20 == 0:
-        print("Iter {}.  LL:  {:.1f}".format(itr, test_model.log_likelihood()))
-    W_smpls[itr, :, :] = test_model.trans_distn.W
+        print(test_model.log_likelihood())
+    A_smpls[itr, :, :] = test_model.trans_distn.A
     z_smpls[itr] = test_model.stateseqs[0]
 
 # Get the inferred state sequence
@@ -125,8 +123,8 @@ XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
 true_prs = true_model.trans_distn.pi(
     np.column_stack((np.zeros((XY.shape[0], Nmax)), XY)))
 
-test_prs = test_model.trans_distn.get_trans_matrices(XY)
-test_prs = test_prs[:,0,:]
+test_prs = test_model.trans_distn.pi(
+    np.column_stack((np.zeros((XY.shape[0], Nmax)), XY)))
 
 fig = plt.figure(figsize=(10,6))
 for to_plot in range(Nmax):
@@ -177,5 +175,10 @@ for to_plot in range(Nmax):
 
 fig.suptitle("Input HMM with 2D Exogenous Inputs")
 plt.tight_layout()
+# plt.savefig("inhmm_partition.png")
+
+# # Plot the true state sequence over time
+# plt.figure(figsize=(8,4))
+# plt.plot(true_Z)
 
 plt.show()

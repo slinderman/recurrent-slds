@@ -32,8 +32,7 @@ mask_start, mask_stop = 0, 0
 N_iters = 1000
 
 # Save / cache the outputs
-RUN_NUMBER = 1
-RESULTS_DIR = os.path.join("results", "nascar", "run{:03d}".format(RUN_NUMBER))
+RESULTS_DIR = '.'
 
 
 ### Plotting code
@@ -131,7 +130,7 @@ def make_figure(true_model, z_true, x_true, y,
 
 
 ### Make an example with 2D latent states and 4 discrete states
-@cached(RESULTS_DIR, "simulated_data")
+# @cached(RESULTS_DIR, "simulated_data")
 def simulate_nascar():
     assert K_true == 4
     As = [random_rotation(D_latent, np.pi/24.),
@@ -212,7 +211,7 @@ def simulate_nascar():
     return model, inputs, z, x, y, mask
 
 ### Factor Analysis and PCA for dimensionality reduction
-@cached(RESULTS_DIR, "factor_analysis")
+# @cached(RESULTS_DIR, "factor_analysis")
 def fit_factor_analysis(y, mask=None, N_iters=100):
     print("Fitting Factor Analysis")
     model = FactorAnalysis(D_obs, D_latent)
@@ -229,7 +228,7 @@ def fit_factor_analysis(y, mask=None, N_iters=100):
     C_init = np.column_stack((model.W, b))
     return data.Z, C_init
 
-@cached(RESULTS_DIR, "pca")
+# @cached(RESULTS_DIR, "pca")
 def fit_pca(y, whiten=True):
     print("Fitting PCA")
     from sklearn.decomposition import PCA
@@ -247,7 +246,7 @@ def fit_pca(y, whiten=True):
     return x_init, np.column_stack((C_init, b_init))
 
 ### Make an ARHMM for initialization
-@cached(RESULTS_DIR, "arhmm")
+# @cached(RESULTS_DIR, "arhmm")
 def fit_arhmm(x, affine=True):
     print("Fitting Sticky ARHMM")
     dynamics_hypparams = \
@@ -326,7 +325,7 @@ def make_rslds_parameters(C_init):
     return init_dynamics_distns, dynamics_distns, emission_distns
 
 
-@cached(RESULTS_DIR, "slds")
+# @cached(RESULTS_DIR, "slds")
 def fit_slds(inputs, z_init, x_init, y, mask, C_init,
               N_iters=1000):
     print("Fitting standard SLDS")

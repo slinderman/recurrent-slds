@@ -442,6 +442,6 @@ if __name__ == "__main__":
         xs.append(x[1:])
 
     make_figure(true_model)
-    # make_extended_figure(true_model, zs, xs)
-    # make_nonlinear_figure(true_model)
+    make_extended_figure(true_model, zs, xs)
+    make_nonlinear_figure(true_model)
     plt.show()

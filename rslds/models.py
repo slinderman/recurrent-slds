@@ -235,23 +235,6 @@ class _RecurrentSLDSBase(object):
         self.states_list.append(
                 self._states_class(model=self, data=data, **kwargs))
 
-    def generate(self, T=100, keep=True, with_noise=True, **kwargs):
-        s = self._states_class(model=self, T=T, initialize_from_prior=True, **kwargs)
-        s.generate_states(with_noise=with_noise)
-        data = self._generate_obs(s, with_noise=with_noise)
-        if keep:
-            self.states_list.append(s)
-        return data + (s.stateseq,)
-
-    def _generate_obs(self, s, with_noise=True):
-        if s.data is None:
-            s.data = s.generate_obs()
-        else:
-            # TODO: Handle missing data
-            raise NotImplementedError
-
-        return s.data, s.gaussian_states
-
 
 class PGRecurrentSLDS(_RecurrentSLDSBase, _SLDSGibbsMixin, InputHMM):
 
@@ -304,6 +287,11 @@ class SoftmaxRecurrentSLDS(_RecurrentSLDSBase, _SLDSMeanFieldMixin, _SLDSVBEMMix
     def _init_mf_from_gibbs(self):
         self.trans_distn._initialize_mean_field()
         super(SoftmaxRecurrentSLDS, self)._init_mf_from_gibbs()
+
+    def initialize_transitions_from_gibbs(self):
+        self.trans_distn.initialize_with_logistic_regression(
+            [s.stateseq for s in self.states_list],
+            [s.gaussian_states for s in self.states_list])
 
     def meanfield_update_parameters(self):
         self.meanfield_update_init_dynamics_distns()
