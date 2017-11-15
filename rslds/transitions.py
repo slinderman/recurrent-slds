@@ -254,7 +254,8 @@ class _SoftmaxInputHMMTransitionsBase(object):
             self._lr = LogisticRegression(verbose=False,
                                           multi_class="multinomial",
                                           solver="lbfgs",
-                                          warm_start=True)
+                                          warm_start=True,
+                                          max_iter=10)
         lr = self._lr
 
         # Make the covariates
