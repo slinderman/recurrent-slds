@@ -54,10 +54,9 @@ dataset = [true_model.generate(T, covariates=covariate_seq[:,:D_in]) for _ in ra
 # Generate inference test model - initialized randomly #
 ########################################################
 test_model = \
-    PGInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
-               init_state_concentration=1.0,
-               D_in=D_in,
-               trans_params=dict(sigmasq_b=0.001))
+    SoftmaxInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
+                    init_state_concentration=1.0,
+                    D_in=D_in)
 
 for (obs, covs), _ in dataset:
     test_model.add_data(data=obs, covariates=covs[:,:D_in])
@@ -65,13 +64,14 @@ for (obs, covs), _ in dataset:
 # run sampler
 print("io hmm sampling")
 num_iter = 200
-A_smpls = np.zeros((num_iter,) + test_model.trans_distn.A.shape)
+A_smpls = np.zeros((num_iter,) + test_model.trans_distn.W.shape)
 z_smpls = np.zeros((num_iter, T))
 for itr in range(num_iter):
-    test_model.resample_model(num_procs=0)
+    # test_model.resample_model(num_procs=0)
+    test_model.EM_step()
     if itr % 20 == 0:
         print(test_model.log_likelihood())
-    A_smpls[itr, :, :] = test_model.trans_distn.A
+    A_smpls[itr, :, :] = test_model.trans_distn.W
     z_smpls[itr] = test_model.stateseqs[0]
 
 # Get the inferred state sequence
@@ -123,8 +123,12 @@ XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
 true_prs = true_model.trans_distn.pi(
     np.column_stack((np.zeros((XY.shape[0], Nmax)), XY)))
 
-test_prs = test_model.trans_distn.pi(
-    np.column_stack((np.zeros((XY.shape[0], Nmax)), XY)))
+from scipy.misc import logsumexp
+test_log_prs = XY.dot(test_model.trans_distn.W)
+test_log_prs = test_log_prs - logsumexp(test_log_prs, axis=1, keepdims=True)
+test_prs = np.exp(test_log_prs)
+
+
 
 fig = plt.figure(figsize=(10,6))
 for to_plot in range(Nmax):

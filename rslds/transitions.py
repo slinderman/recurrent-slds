@@ -248,9 +248,14 @@ class _SoftmaxInputHMMTransitionsBase(object):
         log_trans_matrices = self.get_log_trans_matrices(X)
         return np.exp(log_trans_matrices)
 
-    def initialize_with_logistic_regression(self, zs, xs):
+    def initialize_with_logistic_regression(self, zs, xs, initialize=False):
         from sklearn.linear_model.logistic import LogisticRegression
-        lr = LogisticRegression(verbose=False, multi_class="multinomial", solver="lbfgs")
+        if not hasattr(self, '_lr'):
+            self._lr = LogisticRegression(verbose=False,
+                                          multi_class="multinomial",
+                                          solver="lbfgs",
+                                          warm_start=True)
+        lr = self._lr
 
         # Make the covariates
         K, D = self.num_states, self.covariate_dim
@@ -265,18 +270,33 @@ class _SoftmaxInputHMMTransitionsBase(object):
         assert zns.ndim == 1 and zns.dtype == np.int32 and zns.min() >= 0 and zns.max() < K
         assert xps.ndim == 2 and xps.shape[1] == D
 
+        used = np.bincount(zns, minlength=K) > 0
+        K_used = np.sum(used)
+
         lr_X = np.column_stack((one_hot(zps, K), xps))
         lr_y = zns
         lr.fit(lr_X, lr_y)
 
         # Now convert the logistic regression into weights
-        used = np.bincount(zns, minlength=K) > 0
-        self.W = np.zeros((D, K))
-        self.W[:, used] = lr.coef_[:, K:].T
-        self.logpi = np.zeros((K, K))
-        self.logpi[:, used] = lr.coef_[:, :K].T
-        self.logpi[:, used] += lr.intercept_[None, :]
-        self.logpi[:, ~used] += -100.
+        if K_used > 2:
+            self.W = np.zeros((D, K))
+            self.W[:, used] = lr.coef_[:, K:].T
+            self.logpi = np.zeros((K, K))
+            self.logpi[:, used] = lr.coef_[:, :K].T
+            self.logpi[:, used] += lr.intercept_[None, :]
+            self.logpi[:, ~used] += -100.
+
+        elif K_used == 2:
+            # LogisticRegression object only represents one
+            # set of weights for binary problems
+            self.W = np.zeros((D, K))
+            self.W[:, 1] = lr.coef_[0, K:]
+            self.logpi = np.zeros((K, K))
+            self.logpi[:, 1] = lr.coef_[0, :K].T
+            self.logpi[:, 1] += lr.intercept_
+
+        else:
+            raise Exception("Need at least 2 classes to be used!")
 
 
 class _SoftmaxInputHMMTransitionsHMC(_SoftmaxInputHMMTransitionsBase):
@@ -314,30 +334,32 @@ class _SoftmaxInputHMMTransitionsHMC(_SoftmaxInputHMMTransitionsBase):
 
         return ll
 
-    def resample_hmc(self, stateseqs=None, covseqs=None,
+    def resample(self, stateseqs=None, covseqs=None,
                  n_steps=10, **kwargs):
         K, D = self.num_states, self.covariate_dim
 
-        # Run HMC
-        from hips.inference.hmc import hmc
-        def hmc_objective(params):
-            # Unpack params
-            K, D = self.num_states, self.covariate_dim
-            logpi = params[:K ** 2].reshape((K, K))
-            W = params[K ** 2:].reshape((D, K))
-            return self.joint_log_probability(logpi, W, stateseqs, covseqs)
-
-        grad_hmc_objective = grad(hmc_objective)
-        x0 = np.concatenate((np.ravel(self.logpi), np.ravel(self.W)))
-        xf, self.step_sz, self.accept_rate = \
-            hmc(hmc_objective, grad_hmc_objective,
-                step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
-                negative_log_prob=False,
-                adaptive_step_sz=True,
-                avg_accept_rate=self.accept_rate)
-
-        self.logpi = xf[:K**2].reshape((K, K))
-        self.W = xf[K**2:].reshape((D, K))
+        covseqs = [np.row_stack([c, np.zeros(D)]) for c in covseqs]
+        self.initialize_with_logistic_regression(stateseqs, covseqs, initialize=True)
+        # # Run HMC
+        # from hips.inference.hmc import hmc
+        # def hmc_objective(params):
+        #     # Unpack params
+        #     K, D = self.num_states, self.covariate_dim
+        #     logpi = params[:K ** 2].reshape((K, K))
+        #     W = params[K ** 2:].reshape((D, K))
+        #     return self.joint_log_probability(logpi, W, stateseqs, covseqs)
+        #
+        # grad_hmc_objective = grad(hmc_objective)
+        # x0 = np.concatenate((np.ravel(self.logpi), np.ravel(self.W)))
+        # xf, self.step_sz, self.accept_rate = \
+        #     hmc(hmc_objective, grad_hmc_objective,
+        #         step_sz=self.step_sz, n_steps=n_steps, q_curr=x0,
+        #         negative_log_prob=False,
+        #         adaptive_step_sz=True,
+        #         avg_accept_rate=self.accept_rate)
+        #
+        # self.logpi = xf[:K**2].reshape((K, K))
+        # self.W = xf[K**2:].reshape((D, K))
 
 
 class _SoftmaxInputHMMTransitionsEM(_SoftmaxInputHMMTransitionsBase):

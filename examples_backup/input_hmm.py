@@ -16,7 +16,7 @@ from hips.plotting.colormaps import gradient_cmap
 cmap = gradient_cmap(colors)
 
 from pybasicbayes.distributions import Gaussian
-from rslds.models import PGInputHMM, SoftmaxInputHMM
+from rslds.models import InputHMM
 
 
 #################################################
@@ -36,7 +36,7 @@ obs_hypparams = {'mu_0':np.zeros(D_obs),
                 'kappa_0':1.0,
                 'nu_0': D_obs + 2}
 true_model = \
-    PGInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
+    InputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
              init_state_concentration=1.0,
              D_in=D_in,
              trans_params=dict(sigmasq_A=4.0, sigmasq_b=0.001))
@@ -54,10 +54,10 @@ dataset = [true_model.generate(T, covariates=covariate_seq[:,:D_in]) for _ in ra
 # Generate inference test model - initialized randomly #
 ########################################################
 test_model = \
-    PGInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
-               init_state_concentration=1.0,
-               D_in=D_in,
-               trans_params=dict(sigmasq_b=0.001))
+    InputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
+             init_state_concentration=1.0,
+             D_in=D_in,
+             trans_params=dict(sigmasq_b=0.001))
 
 for (obs, covs), _ in dataset:
     test_model.add_data(data=obs, covariates=covs[:,:D_in])

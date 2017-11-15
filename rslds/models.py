@@ -87,46 +87,43 @@ class _InputHMMMixin(object):
         )
         self._clear_caches()
 
-    ## EM
-    def _M_step_trans_distn(self):
-        self.trans_distn.max_likelihood(
-            expected_stateseqs=[s.expected_states for s in self.states_list],
-            expected_covseqs=[s.covariates for s in self.states_list]
-        )
 
-    ### Mean Field
-    def meanfield_update_trans_distn(self):
-        # self.trans_distn.meanfieldupdate(
-        #     [s.expected_transcounts for s in self.states_list])
-        # self._clear_caches()
-        raise NotImplementedError
-
-
-class InputHMM(_InputHMMMixin, _HMMGibbsSampling, _HMMEM, _HMMMeanField):
+class PGInputHMM(_InputHMMMixin, _HMMGibbsSampling):
     _trans_class = transitions.InputHMMTransitions
     _states_class = InputHMMStates
 
 
-class InputOnlyHMM(InputHMM):
+class PGInputOnlyHMM(PGInputHMM):
     _trans_class = transitions.InputOnlyHMMTransitions
 
 
-class StickyInputOnlyHMM(InputHMM):
+class PGStickyInputOnlyHMM(PGInputHMM):
     _trans_class = transitions.StickyInputOnlyHMMTransitions
 
 
-class SoftmaxInputHMM(InputHMM):
+class SoftmaxInputHMM(_InputHMMMixin, _HMMGibbsSampling, _HMMEM):
     _trans_class = transitions.SoftmaxInputHMMTransitions
+    _states_class = InputHMMStates
+
+    ## EM
+    def _M_step_trans_distn(self):
+        # TODO: update this to correct signature
+        # self.trans_distn.max_likelihood(
+        #     expected_stateseqs=[s.expected_states for s in self.states_list],
+        #     expected_covseqs=[s.covariates for s in self.states_list]
+        # )
+        zs = [s.expected_states.argmax(1).astype(np.int32) for s in self.states_list]
+        xs = [s.covariates for s in self.states_list]
+        xs = [np.row_stack([x, np.zeros(x.shape[1])]) for x in xs]
+        self.trans_distn.initialize_with_logistic_regression(zs, xs)
 
 
-class SoftmaxInputOnlyHMM(InputHMM):
+class SoftmaxInputOnlyHMM(SoftmaxInputHMM):
     _trans_class = transitions.SoftmaxInputOnlyHMMTransitions
 
 
 ### ARHMM's
-class InputARHMM(_InputHMMMixin, _ARMixin, _HMMGibbsSampling):
-    _trans_class = transitions.InputHMMTransitions
-    _states_class = InputHMMStates
+class _InputARHMMMixin(_InputHMMMixin, _ARMixin):
 
     def add_data(self, data, covariates=None, strided=False, **kwargs):
         if covariates is None:
@@ -135,42 +132,64 @@ class InputARHMM(_InputHMMMixin, _ARMixin, _HMMGibbsSampling):
         strided_data = AR_striding(data,self.nlags) if not strided else data
         lagged_covariates = covariates[self.nlags:]
         assert strided_data.shape[0] == lagged_covariates.shape[0]
-        super(InputARHMM, self).add_data(data=strided_data,covariates=lagged_covariates,**kwargs)
+        super(_InputARHMMMixin, self).add_data(data=strided_data,covariates=lagged_covariates,**kwargs)
 
 
-class InputOnlyARHMM(InputARHMM):
+class PGInputARHMM(_InputARHMMMixin, _HMMGibbsSampling):
+    _trans_class = transitions.InputHMMTransitions
+    _states_class = InputHMMStates
+
+
+class PGInputOnlyARHMM(PGInputARHMM):
     _trans_class = transitions.InputOnlyHMMTransitions
 
 
-class StickyInputOnlyARHMM(InputARHMM):
+class PGStickyInputOnlyARHMM(PGInputARHMM):
     _trans_class = transitions.StickyInputOnlyHMMTransitions
 
 
-class SoftmaxInputARHMM(InputARHMM):
+class SoftmaxInputARHMM(_InputARHMMMixin, _HMMGibbsSampling, _HMMEM):
     _trans_class = transitions.SoftmaxInputHMMTransitions
+    _states_class = InputHMMStates
 
 
-class SoftmaxInputOnlyARHMM(InputARHMM):
+class SoftmaxInputOnlyARHMM(SoftmaxInputARHMM):
     _trans_class = transitions.SoftmaxInputOnlyHMMTransitions
 
 
 ### Recurrent ARHMM's
-class RecurrentARHMM(InputARHMM):
+class _RecurrentARHMMMixin(_InputARHMMMixin):
     """
-    In the "recurrent" version, the data are the covariates.
+    In the "recurrent" version, the data also serve as covariates.
     """
-    # TODO: We should also allow for (data, inputs) to be covariates
-    def add_data(self, data, **kwargs):
-        assert "covariates" not in kwargs
-        covariates = np.row_stack((np.zeros(self.D),
-                                   data[:-1]))
-        super(RecurrentARHMM, self).add_data(data, covariates=covariates, **kwargs)
+    def add_data(self, data, covariates=None, strided=False, **kwargs):
+        # Remember that the covariates[t] drives the transition probabilities p(z[t] | ...)
+        # under our convention for add_data.
+        T = data.shape[0]
+        if covariates is None:
+            covariates = np.zeros((T, 0))
+        else:
+            assert covariates.shape[0] == T
+
+        # Combine the lagged data and the given covariates
+        covariates = np.column_stack((
+            np.row_stack((np.zeros(self.D), data[:-1])),
+            covariates))
+
+        super(_RecurrentARHMMMixin, self).add_data(data, covariates=covariates, **kwargs)
 
 
     def generate(self, T=100, keep=True, init_data=None, covariates=None, with_noise=True):
         from pybasicbayes.util.stats import sample_discrete
         # Generate from the prior and raise exception if unstable
         K, n = self.num_states, self.D
+
+        # Prepare the covariates
+        if covariates is None:
+            covariates = np.zeros((T, 0))
+        else:
+            assert covariates.shape[0] == T
+
 
         # Initialize discrete state sequence
         pi_0 = self.init_state_distn.pi_0
@@ -184,17 +203,17 @@ class RecurrentARHMM(InputARHMM):
             data[0] = init_data
 
         for t in range(1, T):
-            # Sample discrete state given previous continuous state
-            A = self.trans_distn.get_trans_matrices(data[t-1:t])[0]
+            # Sample discrete state given previous continuous state and covariates
+            cov_t = np.column_stack((data[t-1:t], covariates[t]))
+            A = self.trans_distn.get_trans_matrices(cov_t)[0]
             dss[t] = sample_discrete(A[dss[t-1], :])
 
             # Sample continuous state given current discrete state
             if with_noise:
-                data[t] = self.obs_distns[dss[t]]. \
-                    rvs(np.hstack((data[t-1][None, :])))
+                data[t] = self.obs_distns[dss[t]].rvs(cov_t, return_xy=False)
             else:
-                data[t] = self.obs_distns[dss[t]]. \
-                    predict(np.hstack((data[t - 1][None, :])))
+                data[t] = self.obs_distns[dss[t]].predict(cov_t)
+
             assert np.all(np.isfinite(data[t])), "RARHMM appears to be unstable!"
 
         # TODO:
@@ -204,19 +223,25 @@ class RecurrentARHMM(InputARHMM):
         return data, dss
 
 
-class RecurrentOnlyARHMM(RecurrentARHMM):
+class PGRecurrentARHMM(_RecurrentARHMMMixin, _HMMGibbsSampling):
+    _trans_class = transitions.InputHMMTransitions
+    _states_class = InputHMMStates
+
+
+class PGRecurrentOnlyARHMM(PGRecurrentARHMM):
     _trans_class = transitions.InputOnlyHMMTransitions
 
 
-class StickyRecurrentOnlyARHMM(RecurrentARHMM):
+class PGStickyRecurrentOnlyARHMM(PGRecurrentARHMM):
     _trans_class = transitions.StickyInputOnlyHMMTransitions
 
 
-class SoftmaxRecurrentARHMM(RecurrentARHMM):
+class SoftmaxRecurrentARHMM(_RecurrentARHMMMixin, _HMMGibbsSampling, _HMMEM):
     _trans_class = transitions.SoftmaxInputHMMTransitions
+    _states_class = InputHMMStates
 
 
-class SoftmaxRecurrentOnlyARHMM(RecurrentARHMM):
+class SoftmaxRecurrentOnlyARHMM(SoftmaxRecurrentARHMM):
     _trans_class = transitions.SoftmaxInputOnlyHMMTransitions
 
 
@@ -227,6 +252,7 @@ class _RecurrentSLDSBase(object):
 
         self.fixed_emission = fixed_emission
 
+        # This class must always be used in conjunction with an SLDS class
         super(_RecurrentSLDSBase, self).__init__(
             dynamics_distns, emission_distns, init_dynamics_distns,
             D_in=dynamics_distns[0].D_out, **kwargs)
@@ -236,7 +262,7 @@ class _RecurrentSLDSBase(object):
                 self._states_class(model=self, data=data, **kwargs))
 
 
-class PGRecurrentSLDS(_RecurrentSLDSBase, _SLDSGibbsMixin, InputHMM):
+class PGRecurrentSLDS(_RecurrentSLDSBase, _SLDSGibbsMixin, PGInputHMM):
 
     _states_class = PGRecurrentSLDSStates
     _trans_class = transitions.InputHMMTransitions
@@ -269,7 +295,7 @@ class StickyPGRecurrentOnlySLDS(PGRecurrentSLDS):
 
 
 ### Softmax transition models with variational inference
-class SoftmaxRecurrentSLDS(_RecurrentSLDSBase, _SLDSMeanFieldMixin, _SLDSVBEMMixin, InputHMM):
+class SoftmaxRecurrentSLDS(_RecurrentSLDSBase, _SLDSMeanFieldMixin, _SLDSVBEMMixin, SoftmaxInputHMM):
     _states_class = SoftmaxRecurrentSLDSStates
     _trans_class = transitions.SoftmaxInputHMMTransitions
 
