@@ -132,7 +132,11 @@ class _InputARHMMMixin(_InputHMMMixin, _ARMixin):
         strided_data = AR_striding(data,self.nlags) if not strided else data
         lagged_covariates = covariates[self.nlags:]
         assert strided_data.shape[0] == lagged_covariates.shape[0]
-        super(_InputARHMMMixin, self).add_data(data=strided_data,covariates=lagged_covariates,**kwargs)
+
+        # Pass to InputHMM
+        super(_InputARHMMMixin, self).add_data(data=strided_data,
+                                               covariates=lagged_covariates,
+                                               **kwargs)
 
 
 class PGInputARHMM(_InputARHMMMixin, _HMMGibbsSampling):
