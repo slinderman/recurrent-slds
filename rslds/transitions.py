@@ -276,28 +276,34 @@ class _SoftmaxInputHMMTransitionsBase(object):
 
         lr_X = np.column_stack((one_hot(zps, K), xps))
         lr_y = zns
-        lr.fit(lr_X, lr_y)
 
-        # Now convert the logistic regression into weights
-        if K_used > 2:
+        # The logistic regression solver fails if we only have one class represented
+        # In this case, set the regression weights to zero and set logpi to have
+        # high probability of the visited class
+        if K_used == 1:
             self.W = np.zeros((D, K))
-            self.W[:, used] = lr.coef_[:, K:].T
-            self.logpi = np.zeros((K, K))
-            self.logpi[:, used] = lr.coef_[:, :K].T
-            self.logpi[:, used] += lr.intercept_[None, :]
-            self.logpi[:, ~used] += -100.
-
-        elif K_used == 2:
-            # LogisticRegression object only represents one
-            # set of weights for binary problems
-            self.W = np.zeros((D, K))
-            self.W[:, 1] = lr.coef_[0, K:]
-            self.logpi = np.zeros((K, K))
-            self.logpi[:, 1] = lr.coef_[0, :K].T
-            self.logpi[:, 1] += lr.intercept_
-
+            self.log_pi = np.zeros((K, K))
+            self.log_pi[:, used] = 3.0
         else:
-            raise Exception("Need at least 2 classes to be used!")
+            lr.fit(lr_X, lr_y)
+
+            # Now convert the logistic regression into weights
+            if K_used > 2:
+                self.W = np.zeros((D, K))
+                self.W[:, used] = lr.coef_[:, K:].T
+                self.logpi = np.zeros((K, K))
+                self.logpi[:, used] = lr.coef_[:, :K].T
+                self.logpi[:, used] += lr.intercept_[None, :]
+                self.logpi[:, ~used] += -100.
+
+            elif K_used == 2:
+                # LogisticRegression object only represents one
+                # set of weights for binary problems
+                self.W = np.zeros((D, K))
+                self.W[:, 1] = lr.coef_[0, K:]
+                self.logpi = np.zeros((K, K))
+                self.logpi[:, 1] = lr.coef_[0, :K].T
+                self.logpi[:, 1] += lr.intercept_
 
 
 class _SoftmaxInputHMMTransitionsHMC(_SoftmaxInputHMMTransitionsBase):
@@ -338,6 +344,9 @@ class _SoftmaxInputHMMTransitionsHMC(_SoftmaxInputHMMTransitionsBase):
     def resample(self, stateseqs=None, covseqs=None,
                  n_steps=10, **kwargs):
         K, D = self.num_states, self.covariate_dim
+
+        if K == 1:
+            return
 
         covseqs = [np.row_stack([c, np.zeros(D)]) for c in covseqs]
         self.initialize_with_logistic_regression(stateseqs, covseqs, initialize=True)
@@ -722,3 +731,66 @@ class SoftmaxInputOnlyHMMTransitions(SoftmaxInputHMMTransitions):
         b[~used] += -100.
         self.b = b
 
+
+
+class NNInputHMMTransitions(object):
+    """
+    Use a neural net to predict transitions.
+    """
+    def __init__(self, num_states, covariate_dim):
+        self.num_states = num_states
+        self.covariate_dim = covariate_dim
+        self.D_out = num_states
+        self.D_in = num_states + covariate_dim
+
+        from sklearn.neural_network import MLPClassifier
+        self.mlp = MLPClassifier(verbose=True, warm_start=True)
+
+
+    def log_prior(self):
+        # Normal N(mu | mu_0, Sigma / kappa_0)
+        return 0
+
+    def get_log_trans_matrices(self, X):
+        # compute the contribution of the covariate to transition matrix
+        T = X.shape[0]
+        K = self.num_states
+        log_trans_matrices = np.zeros((T, K, K))
+        for k in range(K):
+            inputs = np.column_stack((np.zeros((T, K)), X))
+            inputs[:, k] = 1
+            log_trans_matrices[:, k, :] = self.mlp.predict_log_proba(inputs)
+
+        # Renormalize
+        log_trans_matrices -= amisc.logsumexp(log_trans_matrices, axis=2, keepdims=True)
+
+        return log_trans_matrices
+
+    def get_trans_matrices(self, X):
+        log_trans_matrices = self.get_log_trans_matrices(X)
+        return np.exp(log_trans_matrices)
+
+    def resample(self, stateseqs=None, covseqs=None):
+        # import ipdb; ipdb.set_trace()
+        K, D = self.num_states, self.covariate_dim
+
+        covseqs = [np.row_stack([c, np.zeros(D)]) for c in covseqs]
+
+        # Make the covariates
+        zs = stateseqs
+        xs = covseqs
+        K, D = self.num_states, self.covariate_dim
+
+        # Split zs into prevs and nexts
+        zps = zs[:-1] if isinstance(zs, np.ndarray) else np.concatenate([z[:-1] for z in zs], axis=0)
+        zns = zs[1:] if isinstance(zs, np.ndarray) else np.concatenate([z[1:] for z in zs], axis=0)
+        xps = xs[:-1] if isinstance(xs, np.ndarray) else np.concatenate([x[:-1] for x in xs], axis=0)
+
+        assert zps.shape[0] == xps.shape[0]
+        assert zps.ndim == 1 and zps.dtype == np.int32 and zps.min() >= 0 and zps.max() < K
+        assert zns.ndim == 1 and zns.dtype == np.int32 and zns.min() >= 0 and zns.max() < K
+        assert xps.ndim == 2 and xps.shape[1] == D
+
+        lr_X = np.column_stack((one_hot(zps, K), xps))
+        lr_y = one_hot(zns, K)
+        self.mlp.fit(lr_X, lr_y)
