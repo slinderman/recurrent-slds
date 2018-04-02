@@ -1,6 +1,8 @@
+import numpy as np
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.colors import LinearSegmentedColormap
 
 import seaborn as sns
 color_names = ["windows blue",
@@ -14,9 +16,33 @@ colors = sns.xkcd_palette(color_names)
 sns.set_style("white")
 sns.set_context("paper")
 
-from hips.plotting.colormaps import gradient_cmap
 
-import numpy as np
+def gradient_cmap(colors, nsteps=256, bounds=None):
+    # Make a colormap that interpolates between a set of colors
+    ncolors = len(colors)
+    # assert colors.shape[1] == 3
+    if bounds is None:
+        bounds = np.linspace(0,1,ncolors)
+
+
+    reds = []
+    greens = []
+    blues = []
+    alphas = []
+    for b,c in zip(bounds, colors):
+        reds.append((b, c[0], c[0]))
+        greens.append((b, c[1], c[1]))
+        blues.append((b, c[2], c[2]))
+        alphas.append((b, c[3], c[3]) if len(c) == 4 else (b, 1., 1.))
+
+    cdict = {'red': tuple(reds),
+             'green': tuple(greens),
+             'blue': tuple(blues),
+             'alpha': tuple(alphas)}
+
+    cmap = LinearSegmentedColormap('grad_colormap', cdict, nsteps)
+    return cmap
+
 
 def plot_dynamics(A, b=None, ax=None, plot_center=True,
                   xlim=(-4,4), ylim=(-3,3), npts=20,
