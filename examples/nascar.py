@@ -43,7 +43,7 @@ from rslds.models import PGRecurrentSLDS, StickyPGRecurrentSLDS, \
 from rslds.util import compute_psi_cmoments
 
 ### Global parameters
-T, K, K_true, D_obs, D_latent = 10000, 4, 4, 10, 2
+T, T_gen, K, K_true, D_obs, D_latent = 10000, 2000, 4, 4, 10, 2
 mask_start, mask_stop = 0, 0
 N_samples = 1000
 
@@ -80,19 +80,8 @@ def cached(results_name):
 
 def make_figure(true_model, z_true, x_true, y,
                 rslds, zs_rslds, x_rslds,
-                z_rslds_gen, x_rslds_gen, y_rslds_gen,
-                slds, zs_slds, x_slds,
-                z_slds_gen, x_slds_gen, y_slds_gen):
-    """
-    Show the following:
-     - True latent dynamics (for most likely state)
-     - Segment of trajectory in latent space
-     - A few examples of observations in 10D space
-     - ARHMM segmentation of factors
-     - rSLDS segmentation of factors
-     - ARHMM synthesis
-     - rSLDS synthesis
-    """
+                z_rslds_gen, x_rslds_gen,
+                z_slds_gen, x_slds_gen):
     fig = plt.figure(figsize=(6.5,3.5))
     gs = gridspec.GridSpec(2,3)
 
@@ -132,7 +121,7 @@ def make_figure(true_model, z_true, x_true, y,
     ax3.set_title("Inferred Dynamics (rSLDS)")
     plt.figtext(.33 + .025, 1. - .075, '(c)', fontproperties=fp)
 
-    # Plot something... z samples?
+    # Plot samples of discrete state sequence
     ax4 = fig.add_subplot(gs[1,1])
     plot_z_samples(zs_rslds, zref=z_true, plt_slice=(0,1000), ax=ax4)
     ax4.set_title("Discrete State Samples")
@@ -432,7 +421,6 @@ def plot_z_samples(zs, zref=None,
         plt.savefig(os.path.join(RESULTS_DIR, filename))
 
 ### Make an example with 2D latent states and 4 discrete states
-@cached("simulated_data")
 def simulate_nascar():
     assert K_true == 4
     def random_rotation(n, theta):
@@ -458,7 +446,7 @@ def simulate_nascar():
 
     # Add a "right" state
     As.append(np.eye(D_latent))
-    bs.append(np.array([-0.25, 0.]))
+    bs.append(np.array([-0.35, 0.]))
 
     # Construct multinomial regression to divvy up the space #
     w1, b1 = np.array([+1.0, 0.0]), np.array([-2.0])   # x + b > 0 -> x > -b
@@ -563,7 +551,7 @@ def fit_pca(y, whiten=True):
     return x_init, np.column_stack((C_init, b_init))
 
 ### Make an ARHMM for initialization
-# @cached("arhmm")
+@cached("arhmm")
 def fit_arhmm(x, affine=True):
     print("Fitting Sticky ARHMM")
     dynamics_hypparams = \
@@ -647,7 +635,7 @@ def make_rslds_parameters(C_init):
     return init_dynamics_distns, dynamics_distns, emission_distns
 
 
-# @cached("slds")
+@cached("slds")
 def fit_slds(inputs, z_init, x_init, y, mask, C_init,
               N_iters=10000):
     print("Fitting standard SLDS")
@@ -798,11 +786,7 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
         fixed_emission=False,
         alpha=3.)
 
-    rslds.add_data(y, inputs=inputs, mask=mask)
-
-    # Initialize states
-    rslds.states_list[0].stateseq = z_init.copy()
-    rslds.states_list[0].gaussian_states = x_init.copy()
+    rslds.add_data(y, inputs=inputs, mask=mask, stateseq=z_init, gaussian_states=x_init)
 
     # Initialize dynamics
     print("Initializing dynamics with Gibbs sampling")
@@ -817,13 +801,13 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init,
         lps.append(rslds.log_likelihood())
         z_smpls.append(rslds.stateseqs[0].copy())
 
-    x_test = rslds.states_list[0].gaussian_states
+    x_smpl = rslds.states_list[0].gaussian_states
     z_smpls = np.array(z_smpls)
     lps = np.array(lps)
 
-    print("Inf W_markov:\n{}".format(rslds.trans_distn.A[:,:K]))
-    print("Inf W_input:\n{}".format(rslds.trans_distn.A[:,K:]))
-    return rslds, lps, z_smpls, x_test
+    print("Inf W_markov:\n{}".format(rslds.trans_distn.A[:, :K]))
+    print("Inf W_input:\n{}".format(rslds.trans_distn.A[:, K:]))
+    return rslds, lps, z_smpls, x_smpl
 
 
 # @cached("sticky_roslds")
@@ -877,15 +861,7 @@ if __name__ == "__main__":
     ## Simulate NASCAR data
     true_model, inputs, z_true, x_true, y, mask = simulate_nascar()
 
-    # plot_most_likely_dynamics(true_model.trans_distn,
-    #                           true_model.dynamics_distns,
-    #                           figsize=(3,1.5))
-    #
-    # plot_all_dynamics(true_model.dynamics_distns,
-    #                   filename="true_dynamics.png")
-
     ## Run PCA to get 2D dynamics
-    # x_init, C_init = fit_factor_analysis(y, mask=mask)
     x_init, C_init = fit_pca(y)
 
     ## Fit an ARHMM for initialization
@@ -896,16 +872,8 @@ if __name__ == "__main__":
     z_init = np.random.randint(0,K,size=T)
     z_init[good_inds] = good_z_init
     z_init[mask_start:mask_stop] = z_init[mask_start-1]
-    # Zero out missing data
     x_init[~good_inds] = 0
 
-    # plot_trajectory_and_probs(
-    #     z_init[1:], x_init[1:],
-    #     title="Sticky ARHMM",
-    #     filename="sticky_arhmm.png")
-    #
-    # plot_all_dynamics(arhmm.obs_distns,
-    #                   filename="sticky_arhmm_dynamics.png")
 
     ## Fit a DecisionList to get a permutation of z_init
     z_perm, dl_reg = fit_decision_list(z_init, x_init)
@@ -917,19 +885,6 @@ if __name__ == "__main__":
     ## Fit a recurrent SLDS
     # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
     #     fit_rslds(inputs, z_perm, x_init, y, mask, dl_reg, C_init, N_iters=N_iters)
-    #
-    # plot_trajectory_and_probs(
-    #     rslds_z_smpls[-1][1:], rslds_x[1:],
-    #     trans_distn=rslds.trans_distn,
-    #     title="Recurrent SLDS",
-    #     filename="rslds.png")
-    #
-    # plot_all_dynamics(rslds.dynamics_distns,
-    #                   filename="rslds_dynamics.png")
-    #
-    # plot_z_samples(rslds_z_smpls,
-    #                plt_slice=(0,1000),
-    #                filename="rslds_zsamples.png")
 
     ## Fit an input-only recurrent SLDS
     roslds, roslds_lps, roslds_z_smpls, roslds_x = \
@@ -940,17 +895,14 @@ if __name__ == "__main__":
         trans_distn=roslds.trans_distn,
         title="Recurrent SLDS")
 
-    ## Generate from the model
-    T_gen = 2000
-    inputs = np.ones((T_gen, 1))
-    roslds_y_gen, roslds_x_gen, roslds_z_gen = roslds.generate(T=T_gen, inputs=inputs)
-    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
+    ## Generate from the models
+    roslds_y_gen, roslds_x_gen, roslds_z_gen = roslds.generate(T=T_gen, inputs=np.ones((T_gen, 1)))
+    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=np.ones((T_gen, 1)))
 
     make_figure(true_model, z_true, x_true, y,
                 roslds, roslds_z_smpls, roslds_x,
-                roslds_z_gen, roslds_x_gen, roslds_y_gen,
-                slds, slds_z_smpls, slds_x,
-                slds_z_gen, slds_x_gen, slds_y_gen,
+                roslds_z_gen, roslds_x_gen,
+                slds_z_gen, slds_x_gen
                 )
 
     plt.show()

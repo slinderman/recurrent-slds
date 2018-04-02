@@ -72,7 +72,7 @@ class StickyInputHMMTransitions(InputHMMTransitions):
     def __init__(self, num_states, covariate_dim, kappa=1.0, **kwargs):
         assert "mu_A" not in kwargs, "StickyInputHMMTransitions overrides provided mu_A"
         mu_A = np.zeros((num_states-1, num_states+covariate_dim))
-        mu_A[:,:num_states-1] = kappa * np.eye(num_states-1)
+        mu_A[:, :num_states-1] = kappa * np.eye(num_states-1)
         kwargs["mu_A"] = mu_A
 
         super(StickyInputHMMTransitions, self).\
@@ -90,7 +90,7 @@ class InputOnlyHMMTransitions(InputHMMTransitions):
     def __init__(self, num_states, covariate_dim, **kwargs):
         super(InputOnlyHMMTransitions, self).\
             __init__(num_states, covariate_dim, **kwargs)
-        self.A[:,:self.num_states] = 0
+        self.A[:, :self.num_states] = 0
 
     def resample(self, stateseqs=None, covseqs=None, omegas=None, **kwargs):
         """ conditioned on stateseqs and covseqs, stack up all of the data
@@ -113,6 +113,8 @@ class InputOnlyHMMTransitions(InputHMMTransitions):
             resample(datas, mask=masks, omega=omegas)
 
         # Zero out the weights on the previous state
+        # (the previous state inputs were all zero, so these
+        #  weights are meaningless)
         self.A[:, :self.num_states] = 0
 
 

@@ -29,11 +29,51 @@ class InputHMMStates(HMMStatesEigen):
             out[t] = sample_discrete(trans_matrix_seq[t - 1, out[t - 1], :].ravel())
         return out
 
-    def generate_states(self):
-        self.stateseq = InputHMMStates._sample_markov_hetero(
-            T=self.T,
-            trans_matrix_seq=self.trans_matrix,  # stack of matrices
-            init_state_distn=np.ones(self.num_states) / float(self.num_states))
+    def generate_states(self, initial_condition=None, with_noise=True, stateseq=None):
+        """
+        Generate discrete and continuous states.  Note that the handling of 'with_noise'
+        differs slightly from pySLDS implementation.  Rather than selecting the most
+        likely discrete state, we randomly sample the discrete statse.
+        """
+        T, K, n = self.T, self.num_states, self.D_latent
+        As = self.trans_matrix
+
+        # Sample the discrete state sequence as necessary
+        if stateseq is not None:
+            dss = stateseq.astype(np.int32)
+        else:
+            dss = -1 * np.ones(T, dtype=np.int32)
+            if initial_condition is None:
+                dss[0] = np.random.choice(self.num_states)
+            else:
+                dss[0] = initial_condition[0]
+
+            for t in range(1, T):
+                dss[t] = sample_discrete(As[t-1, dss[t-1], :].ravel())
+        assert dss.shape == (T,)
+
+        # Sample the gaussian states
+        gss = np.empty((T, n), dtype='double')
+
+        if initial_condition is None:
+            gss[0] = self.init_dynamics_distns[dss[0]].rvs()
+        else:
+            gss[0] = initial_condition[1]
+
+        for t in range(1, T):
+            # Sample discrete state given previous continuous state
+            if with_noise:
+                # Sample continuous state given current discrete state
+                gss[t] = self.dynamics_distns[dss[t - 1]]. \
+                    rvs(x=np.hstack((gss[t - 1][None, :], self.inputs[t - 1][None, :])),
+                        return_xy=False)
+            else:
+                gss[t] = self.dynamics_distns[dss[t - 1]]. \
+                    predict(np.hstack((gss[t - 1][None, :], self.inputs[t - 1][None, :])))
+            assert np.all(np.isfinite(gss[t])), "SLDS appears to be unstable!"
+
+        self.stateseq = dss
+        self.gaussian_states = gss
 
 
 ###
@@ -62,7 +102,7 @@ class _RecurrentSLDSStatesBase(object):
     def trans_distn(self):
         return self.model.trans_distn
 
-    def generate_states(self, initial_condition=None, with_noise=True):
+    def generate_states(self, initial_condition=None, with_noise=True, stateseq=None):
         """
         Jointly sample the discrete and continuous states
         """
@@ -71,7 +111,7 @@ class _RecurrentSLDSStatesBase(object):
         T, K, n = self.T, self.num_states, self.D_latent
 
         # Initialize discrete state sequence
-        dss = np.empty(T, dtype=np.int32)
+        dss = -1 * np.ones(T, dtype=np.int32) if stateseq is None else stateseq
         gss = np.empty((T,n), dtype='double')
 
         if initial_condition is None:
@@ -87,14 +127,18 @@ class _RecurrentSLDSStatesBase(object):
             A = self.trans_distn.get_trans_matrices(gss[t-1:t])[0]
             if with_noise:
                 # Sample discrete state from recurrent transition matrix
-                dss[t] = sample_discrete(A[dss[t-1], :])
+                if dss[t] == -1:
+                    dss[t] = sample_discrete(A[dss[t-1], :])
+
                 # Sample continuous state given current discrete state
                 gss[t] = self.dynamics_distns[dss[t-1]].\
                     rvs(x=np.hstack((gss[t-1][None,:], self.inputs[t-1][None,:])),
                         return_xy=False)
             else:
                 # Pick the most likely next discrete state and continuous state
-                dss[t] = np.argmax(A[dss[t-1], :])
+                if dss[t] == -1:
+                    dss[t] = np.argmax(A[dss[t-1], :])
+
                 gss[t] = self.dynamics_distns[dss[t-1]]. \
                     predict(np.hstack((gss[t-1][None,:], self.inputs[t-1][None,:])))
             assert np.all(np.isfinite(gss[t])), "SLDS appears to be unstable!"
@@ -109,13 +153,29 @@ class PGRecurrentSLDSStates(_RecurrentSLDSStatesBase,
     """
     Use Pólya-gamma augmentation to perform Gibbs sampling with conjugate updates.
     """
-    def __init__(self, model, covariates=None, data=None, mask=None, **kwargs):
+    def __init__(self, model, covariates=None, data=None, mask=None,
+                 stateseq=None, gaussian_states=None, **kwargs):
 
         super(PGRecurrentSLDSStates, self).\
-            __init__(model, covariates=covariates, data=data, mask=mask, **kwargs)
+            __init__(model, covariates=covariates, data=data, mask=mask,
+                     stateseq=stateseq, gaussian_states=gaussian_states,
+                     **kwargs)
+
+        # Initialize the Polya gamma samplers if they haven't already been set
+        if not hasattr(self, 'ppgs'):
+            import pypolyagamma as ppg
+
+            # Initialize the Polya-gamma samplers
+            num_threads = ppg.get_omp_num_threads()
+            seeds = np.random.randint(2 ** 16, size=num_threads)
+            self.ppgs = [ppg.PyPolyaGamma(seed) for seed in seeds]
 
         # Initialize auxiliary variables for transitions
         self.trans_omegas = np.ones((self.T-1, self.num_states-1))
+
+        # If discrete and continuous states are given, resample the auxiliary variables once
+        if stateseq is not None and gaussian_states is not None:
+            self.resample_transition_auxiliary_variables()
 
     @property
     def info_emission_params(self):
@@ -152,13 +212,13 @@ class PGRecurrentSLDSStates(_RecurrentSLDSStatesBase,
         J_node = J_node.reshape((self.T-1, self.D_latent, self.D_latent))
         return J_node, h_node
 
+    def resample(self, niter=1):
+        super(PGRecurrentSLDSStates, self).resample(niter=niter)
+        self.resample_transition_auxiliary_variables()
+
     def resample_gaussian_states(self):
         super(PGRecurrentSLDSStates, self).resample_gaussian_states()
         self.covariates = self.gaussian_states[:-1].copy()
-
-    def resample_auxiliary_variables(self):
-        super(PGRecurrentSLDSStates, self).resample_auxiliary_variables()
-        self.resample_transition_auxiliary_variables()
 
     def resample_transition_auxiliary_variables(self):
         # Resample the auxiliary variable for the transition matrix
@@ -177,11 +237,9 @@ class PGRecurrentSLDSStates(_RecurrentSLDSStatesBase,
               # + self.inputs.dot(D.T) \
 
         b_pg = trans_distn.b_func(next_state[:,:-1])
-        omega0 = self.trans_omegas.copy()
 
         import pypolyagamma as ppg
         ppg.pgdrawvpar(self.ppgs, b_pg.ravel(), psi.ravel(), self.trans_omegas.ravel())
-        assert not np.allclose(omega0, self.trans_omegas)
 
 
 ##
