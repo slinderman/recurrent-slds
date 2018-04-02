@@ -54,10 +54,12 @@ parser.add_argument('--cache', action='store_true', default=False,
 parser.add_argument('-o', '--output-dir', default='.',
                     help='where to store the results')
 args = parser.parse_args()
+
+print("Setting seed to ", args.seed)
 npr.seed(args.seed)
 
 
-# Helper functions
+# Cache results if requested
 def cached(results_name):
     if args.cache:
         def _cache(func):

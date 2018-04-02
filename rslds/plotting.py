@@ -11,8 +11,18 @@ color_names = ["windows blue",
                "amber",
                "faded green",
                "dusty purple",
-               "crimson",
-               "greyish"]
+               "orange",
+               "clay",
+               "pink",
+               "greyish",
+               "mint",
+               "light cyan",
+               "steel blue",
+               "forest green",
+               "pastel purple",
+               "salmon",
+               "dark brown"]
+
 colors = sns.xkcd_palette(color_names)
 sns.set_style("white")
 sns.set_context("paper")
@@ -148,7 +158,7 @@ def plot_trans_probs(reg, xlim=(-4, 4), ylim=(-3, 3), n_pts=50, ax=None):
 
     for k in range(K):
         start = np.array([1., 1., 1., 0.])
-        end = np.concatenate((colors[k], [0.5]))
+        end = np.concatenate((colors[k % len(colors)], [0.5]))
         cmap = gradient_cmap([start, end])
         im1 = ax.imshow(test_prs[:, k].reshape(*XX.shape),
                         extent=xlim + tuple(reversed(ylim)),
@@ -170,7 +180,7 @@ def plot_trajectory(zhat, x, ax=None, ls="-"):
         ax.plot(x[start:stop + 1, 0],
                 x[start:stop + 1, 1],
                 lw=1, ls=ls,
-                color=colors[zhat[start]],
+                color=colors[zhat[start] % len(colors)],
                 alpha=1.0)
 
     return ax
@@ -208,7 +218,7 @@ def plot_data(zhat, y, ax=None, ls="-"):
         ax.plot(np.arange(start, stop),
                 y[start:stop],
                 lw=1, ls=ls,
-                color=colors[zhat[start]],
+                color=colors[zhat[start] % len(colors)],
                 alpha=1.0)
 
     return ax
@@ -229,7 +239,7 @@ def plot_separate_trans_probs(reg, xlim=(-4, 4), ylim=(-3, 3), n_pts=100, ax=Non
 
     for k in range(K):
         ax = fig.add_subplot(1, K, k + 1)
-        cmap = gradient_cmap([np.ones(3), colors[k]])
+        cmap = gradient_cmap([np.ones(3), colors[k % len(colors)]])
         im1 = ax.imshow(test_prs[:, k].reshape(*XX.shape),
                         extent=xlim + tuple(reversed(ylim)),
                         vmin=0, vmax=1, cmap=cmap)
