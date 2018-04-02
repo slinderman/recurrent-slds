@@ -26,8 +26,8 @@ from hips.plotting.colormaps import gradient_cmap
 from pybasicbayes.distributions import \
     Regression, Gaussian, DiagonalRegression
 
-from pgmult.utils import compute_psi_cmoments
-from rslds.rslds import PGRecurrentSLDS
+from rslds.util import compute_psi_cmoments
+from rslds.models import PGRecurrentSLDS
 
 ### Global parameters
 T, K, K_true, D_obs, D_latent = 200, 5, 5, 2, 2
@@ -373,16 +373,6 @@ def simulate_prior():
     # Account for stick breaking asymmetry
     mu_b, _ = compute_psi_cmoments(np.ones(K_true))
 
-    # Make a recurrent SLDS with these params #
-    # dynamics_distns = [
-    #     Regression(
-    #         nu_0=D_latent + 2,
-    #         S_0=1e-4 * np.eye(D_latent),
-    #         M_0=np.hstack((0.99 * np.eye(D_latent), np.zeros((D_latent, 1)))),
-    #         K_0=np.eye(D_latent + 1),
-    #     )
-    #     for _ in range(K)]
-    dynamics_distns = make_dynamics_distns()
 
     init_dynamics_distns = [
         Gaussian(
@@ -390,19 +380,20 @@ def simulate_prior():
             sigma=5 * np.eye(D_latent))
         for _ in range(K)]
 
-    # C = np.hstack((np.eye(D_latent), np.zeros((D_obs, 1))))
+    dynamics_distns = make_dynamics_distns()
+
     emission_distns = \
         DiagonalRegression(D_obs, D_latent+1,
                            alpha_0=2.0, beta_0=2.0)
 
     model = PGRecurrentSLDS(
-        D_in=D_latent,
         trans_params=dict(sigmasq_A=10., sigmasq_b=0.01),
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
         emission_distns=emission_distns,
         alpha=3.)
+
 
     # Print the true parameters
     np.set_printoptions(precision=2)
@@ -422,7 +413,7 @@ def sample_model(model, x_init=None):
             init_distn.mu = x_init
             init_distn.sigma = 0.001 * np.eye(D_latent)
 
-    (ys, x), z = model.generate(T=T, inputs=inputs)
+    ys, x, z = model.generate(T=T, inputs=inputs)
     y = ys[0]
     return inputs, z, x, y
 
