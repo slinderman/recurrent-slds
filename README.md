@@ -19,6 +19,8 @@ In control literature, these models are known as _hybrid systems_.  We develop e
 }
 ```
 
+Here's a [link to the AISTATS paper](http://proceedings.mlr.press/v54/linderman17a/linderman17a.pdf).
+
 # Installation
 
 This package is built upon many others, all of which are actively being developed.  Follow the links to install these packages from source:
@@ -41,5 +43,5 @@ Start with the NASCAR demo:
 python examples/nascar.py
 ```
 
-
+This will fit a recurrent switching linear dynamical system to synthetic NASCAR data, as in Figure 3 of the AISTATS paper.
 
