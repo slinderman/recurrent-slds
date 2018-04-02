@@ -1,5 +1,5 @@
 # recurrent-slds
-Recurrent Switching Linear Dynamical Systems (rSLDS), like the standard SLDS upon which they are based, are models for decomposing nonlinear time-series data into discrete segments with relatively simple dynamics.  The _recurrent_ SLDS introduces an additional dependency between the discrete and continuous latent states, allowing the discrete state probability to depend upon the previous continuous state.  These dependencies are highlighted in red in the graphical model below. 
+Recurrent Switching Linear Dynamical Systems (rSLDS), like the standard SLDS they are based upon, are models for decomposing nonlinear time-series data into discrete segments with relatively simple dynamics.  The _recurrent_ SLDS introduces an additional dependency between the discrete and continuous latent states, allowing the discrete state probability to depend upon the previous continuous state.  These dependencies are highlighted in red in the graphical model below. 
 
 ![Probabilistic Model](https://raw.githubusercontent.com/slinderman/recurrent-slds/master/aux/rslds_inputs_colorful.jpg)
 
