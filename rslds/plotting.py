@@ -19,9 +19,10 @@ sns.set_context("paper")
 
 
 def gradient_cmap(gcolors, nsteps=256, bounds=None):
-    # Make a colormap that interpolates between a set of colors
+    """
+    Make a colormap that interpolates between a set of colors
+    """
     ncolors = len(gcolors)
-    # assert colors.shape[1] == 3
     if bounds is None:
         bounds = np.linspace(0, 1, ncolors)
 
