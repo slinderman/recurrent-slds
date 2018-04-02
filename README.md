@@ -9,8 +9,6 @@ These dependencies effectively cut up the continuous latent space into partition
 
 In control literature, these models are known as _hybrid systems_.  We develop efficient Bayesian inference algorithms for a class of recurrent SLDS. The important ingredient is an augmentation scheme to enable conjugate block Gibbs updates of the continuous latent states. Complete details of the algorithm are given in the following paper:
 
-Linderman, S. W., Miller, A. C., Adams, R. P., Blei, D. M., Paninski, L., & Johnson, M. J. (2016). Recurrent switching linear dynamical systems. _arXiv preprint arXiv:1610.08466_.
-
 ```
 @inproceedings{linderman2017recurrent,
     title={Bayesian learning and inference in recurrent switching linear dynamical systems},
@@ -25,11 +23,13 @@ Linderman, S. W., Miller, A. C., Adams, R. P., Blei, D. M., Paninski, L., & John
 
 This package is built upon many others, all of which are actively being developed.  Follow the links to install these packages from source:
 
+```
 github.com/mattjj/pybasicbayes
 github.com/mattjj/pyhsmm
 github.com/mattjj/pylds
 github.com/mattjj/pyslds
 github.com/slinderman/pypolyagamma
+```
 
 Note that some of these have cython code which may need to be compiled. Follow the instructions on the project pages if you run into trouble.
 
