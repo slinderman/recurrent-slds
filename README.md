@@ -12,15 +12,34 @@ In control literature, these models are known as _hybrid systems_.  We develop e
 Linderman, S. W., Miller, A. C., Adams, R. P., Blei, D. M., Paninski, L., & Johnson, M. J. (2016). Recurrent switching linear dynamical systems. _arXiv preprint arXiv:1610.08466_.
 
 ```
-@inproceedings{linderman2016recurrent,
-  title={Recurrent switching linear dynamical systems},
-  author={Linderman, Scott W and Miller, Andrew C and Adams, Ryan P and Blei, David M and Paninski, Liam and Johnson, Matthew J},
-  booktitle={To appear in AISTATS},
-  year={2017}
+@inproceedings{linderman2017recurrent,
+    title={Bayesian learning and inference in recurrent switching linear dynamical systems},
+    author={Scott W. Linderman* and Johnson*, Matthew J. and Miller, Andrew C. and Adams, Ryan P. and Blei, David M. and Paninski, Liam},
+    booktitle={Proceedings of the 20th International Conference on Artificial Intelligence and Statistics (AISTATS)},
+    year={2017},
+    link = {http://proceedings.mlr.press/v54/linderman17a/linderman17a.pdf},
 }
 ```
 
+# Installation
 
+This package is built upon many others, all of which are actively being developed.  Follow the links to install these packages from source:
+
+github.com/mattjj/pybasicbayes
+github.com/mattjj/pyhsmm
+github.com/mattjj/pylds
+github.com/mattjj/pyslds
+github.com/slinderman/pypolyagamma
+
+Note that some of these have cython code which may need to be compiled. Follow the instructions on the project pages if you run into trouble.
+
+# Demo
+
+Start with the NASCAR demo:
+
+```
+python examples/nascar.py
+```
 
 
 
