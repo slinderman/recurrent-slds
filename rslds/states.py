@@ -35,46 +35,14 @@ class InputHMMStates(HMMStatesEigen):
         differs slightly from pySLDS implementation.  Rather than selecting the most
         likely discrete state, we randomly sample the discrete statse.
         """
-        T, K, n = self.T, self.num_states, self.D_latent
-        As = self.trans_matrix
-
-        # Sample the discrete state sequence as necessary
-        if stateseq is not None:
-            dss = stateseq.astype(np.int32)
+        if stateseq is None:
+            self.stateseq = InputHMMStates._sample_markov_hetero(
+                T=self.T,
+                trans_matrix_seq=self.trans_matrix,  # stack of matrices
+                init_state_distn=np.ones(self.num_states) / float(self.num_states))
         else:
-            dss = -1 * np.ones(T, dtype=np.int32)
-            if initial_condition is None:
-                dss[0] = np.random.choice(self.num_states)
-            else:
-                dss[0] = initial_condition[0]
-
-            for t in range(1, T):
-                dss[t] = sample_discrete(As[t-1, dss[t-1], :].ravel())
-        assert dss.shape == (T,)
-
-        # Sample the gaussian states
-        gss = np.empty((T, n), dtype='double')
-
-        if initial_condition is None:
-            gss[0] = self.init_dynamics_distns[dss[0]].rvs()
-        else:
-            gss[0] = initial_condition[1]
-
-        for t in range(1, T):
-            # Sample discrete state given previous continuous state
-            if with_noise:
-                # Sample continuous state given current discrete state
-                gss[t] = self.dynamics_distns[dss[t - 1]]. \
-                    rvs(x=np.hstack((gss[t - 1][None, :], self.inputs[t - 1][None, :])),
-                        return_xy=False)
-            else:
-                gss[t] = self.dynamics_distns[dss[t - 1]]. \
-                    predict(np.hstack((gss[t - 1][None, :], self.inputs[t - 1][None, :])))
-            assert np.all(np.isfinite(gss[t])), "SLDS appears to be unstable!"
-
-        self.stateseq = dss
-        self.gaussian_states = gss
-
+            assert stateseq.shape == (self.T,)
+            self.stateseq = stateseq.astype(np.int32)
 
 ###
 # The recurrent SLDS is basically a combo of the Input HMM and SLDS

@@ -27,7 +27,7 @@ from rslds.plotting import plot_most_likely_dynamics, plot_trajectory, plot_z_sa
 from rslds.util import cached
 
 ### Global parameters
-T, K, K_true, D_obs, D_latent = 10000, 4, 4, 10, 2
+T, T_gen, K, K_true, D_obs, D_latent = 10000, 2000, 4, 4, 10, 2
 mask_start, mask_stop = 0, 0
 N_iters = 1000
 
@@ -546,6 +546,11 @@ if __name__ == "__main__":
                        initialization="given",
                        true_model=true_model, N_iters=500)
 
+    plt.figure()
+    plt.plot(rslds_lps)
+    plt.xlabel("Iteration")
+    plt.ylabel("ELBO")
+
     # rslds, rslds_lps, rslds_z_smpls, rslds_x = \
     #     fit_rslds_vbem(inputs, y, mask,
     #                    initialization="none",
@@ -561,11 +566,8 @@ if __name__ == "__main__":
     plot_z_samples(K, rslds_z_smpls, plt_slice=(0,1000))
 
     ## Generate from the model
-    T_gen = 2000
-    inputs = np.ones((T_gen, 1))
-    rslds_y_gen, rslds_x_gen, rslds_z_gen = rslds.generate(T=T_gen, inputs=inputs)
-
-    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=inputs)
+    rslds_y_gen, rslds_x_gen, rslds_z_gen = rslds.generate(T=T_gen, inputs=np.ones((T_gen, 1)), with_noise=True)
+    slds_y_gen, slds_x_gen, slds_z_gen = slds.generate(T=T_gen, inputs=np.ones((T_gen, 1)))
 
     make_figure(true_model, z_true, x_true, y,
                 rslds, rslds_z_smpls, rslds_x,
@@ -574,9 +576,5 @@ if __name__ == "__main__":
                 slds_z_gen, slds_x_gen, slds_y_gen,
                 )
 
-    plt.figure()
-    plt.plot(rslds_lps)
-    plt.xlabel("Iteration")
-    plt.ylabel("ELBO")
 
     plt.show()

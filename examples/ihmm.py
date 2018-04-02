@@ -37,9 +37,9 @@ obs_hypparams = {'mu_0':np.zeros(D_obs),
                 'nu_0': D_obs + 2}
 true_model = \
     PGInputHMM(obs_distns=[Gaussian(**obs_hypparams) for state in range(Nmax)],
-             init_state_concentration=1.0,
-             D_in=D_in,
-             trans_params=dict(sigmasq_A=4.0, sigmasq_b=0.001))
+               init_state_concentration=1.0,
+               D_in=D_in,
+               trans_params=dict(sigmasq_A=4.0, sigmasq_b=0.001))
 
 # Set the weights by hand such that they primarily
 # depend on the input
