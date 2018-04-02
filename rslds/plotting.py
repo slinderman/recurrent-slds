@@ -5,6 +5,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LinearSegmentedColormap
 
 import seaborn as sns
+
 color_names = ["windows blue",
                "red",
                "amber",
@@ -17,19 +18,18 @@ sns.set_style("white")
 sns.set_context("paper")
 
 
-def gradient_cmap(colors, nsteps=256, bounds=None):
+def gradient_cmap(gcolors, nsteps=256, bounds=None):
     # Make a colormap that interpolates between a set of colors
-    ncolors = len(colors)
+    ncolors = len(gcolors)
     # assert colors.shape[1] == 3
     if bounds is None:
-        bounds = np.linspace(0,1,ncolors)
-
+        bounds = np.linspace(0, 1, ncolors)
 
     reds = []
     greens = []
     blues = []
     alphas = []
-    for b,c in zip(bounds, colors):
+    for b, c in zip(bounds, gcolors):
         reds.append((b, c[0], c[0]))
         greens.append((b, c[1], c[1]))
         blues.append((b, c[2], c[2]))
@@ -45,20 +45,20 @@ def gradient_cmap(colors, nsteps=256, bounds=None):
 
 
 def plot_dynamics(A, b=None, ax=None, plot_center=True,
-                  xlim=(-4,4), ylim=(-3,3), npts=20,
+                  xlim=(-4, 4), ylim=(-3, 3), npts=20,
                   color='r'):
     D_latent = A.shape[0]
     b = np.zeros((A.shape[0], 1)) if b is None else b
     x = np.linspace(*xlim, npts)
     y = np.linspace(*ylim, npts)
-    X,Y = np.meshgrid(x,y)
+    X, Y = np.meshgrid(x, y)
     xy = np.column_stack((X.ravel(), Y.ravel()))
 
     # dydt_m = xy.dot(A.T) + b.T - xy
     dydt_m = xy.dot(A.T) + b.T - xy
 
     if ax is None:
-        fig = plt.figure(figsize=(6,6))
+        fig = plt.figure(figsize=(6, 6))
         ax = fig.add_subplot(111)
 
     ax.quiver(xy[:, 0], xy[:, 1],
@@ -69,7 +69,7 @@ def plot_dynamics(A, b=None, ax=None, plot_center=True,
     # Plot the stable point
     if plot_center:
         try:
-            center = -np.linalg.solve(A-np.eye(D_latent), b)
+            center = -np.linalg.solve(A - np.eye(D_latent), b)
             ax.plot(center[0], center[1], 'o', color=color, markersize=8)
         except:
             print("Dynamics are not invertible!")
@@ -79,25 +79,25 @@ def plot_dynamics(A, b=None, ax=None, plot_center=True,
 
     return ax
 
+
 def plot_all_dynamics(dynamics_distns):
     K = len(dynamics_distns)
     D_latent = dynamics_distns[0].D_out
 
-    fig = plt.figure(figsize=(12,3))
+    fig = plt.figure(figsize=(12, 3))
     for k in range(K):
-        ax = fig.add_subplot(1,K,k+1)
-        plot_dynamics(dynamics_distns[k].A[:,:D_latent],
-                      b=dynamics_distns[k].A[:,D_latent:],
+        ax = fig.add_subplot(1, K, k + 1)
+        plot_dynamics(dynamics_distns[k].A[:, :D_latent],
+                      b=dynamics_distns[k].A[:, D_latent:],
                       plot_center=False,
                       color=colors[k], ax=ax)
 
 
 def plot_most_likely_dynamics(
         reg, dynamics_distns,
-        xlim=(-4, 4), ylim=(-3, 3),  nxpts=20, nypts=10,
+        xlim=(-4, 4), ylim=(-3, 3), nxpts=20, nypts=10,
         alpha=0.8,
-        ax=None, figsize=(3,3)):
-
+        ax=None, figsize=(3, 3)):
     K = len(dynamics_distns)
     D_latent = dynamics_distns[0].D_out
     x = np.linspace(*xlim, nxpts)
@@ -107,9 +107,8 @@ def plot_most_likely_dynamics(
 
     # Get the probability of each state at each xy location
     Ts = reg.get_trans_matrices(xy)
-    prs = Ts[:,0,:]
+    prs = Ts[:, 0, :]
     z = np.argmax(prs, axis=1)
-
 
     if ax is None:
         fig = plt.figure(figsize=figsize)
@@ -133,32 +132,33 @@ def plot_most_likely_dynamics(
 
     return ax
 
-def plot_trans_probs(reg, xlim=(-4,4), ylim=(-3,3), n_pts=50, ax=None):
+
+def plot_trans_probs(reg, xlim=(-4, 4), ylim=(-3, 3), n_pts=50, ax=None):
     K = reg.D_out + 1
 
-    XX,YY = np.meshgrid(np.linspace(*xlim,n_pts),
-                        np.linspace(*ylim,n_pts))
+    XX, YY = np.meshgrid(np.linspace(*xlim, n_pts),
+                         np.linspace(*ylim, n_pts))
     XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
-    test_prs = reg.get_trans_matrices(XY)[:,0,:]
+    test_prs = reg.get_trans_matrices(XY)[:, 0, :]
 
     if ax is None:
-        fig = plt.figure(figsize=(10,6))
+        fig = plt.figure(figsize=(10, 6))
         ax = fig.add_subplot(111)
 
     for k in range(K):
         start = np.array([1., 1., 1., 0.])
         end = np.concatenate((colors[k], [0.5]))
         cmap = gradient_cmap([start, end])
-        im1 = ax.imshow(test_prs[:,k].reshape(*XX.shape),
-                         extent=xlim + tuple(reversed(ylim)),
-                         vmin=0, vmax=1, cmap=cmap)
+        im1 = ax.imshow(test_prs[:, k].reshape(*XX.shape),
+                        extent=xlim + tuple(reversed(ylim)),
+                        vmin=0, vmax=1, cmap=cmap)
 
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        # ax.set_title("State {}".format(k+1))
 
     plt.tight_layout()
     return ax
+
 
 def plot_trajectory(zhat, x, ax=None, ls="-"):
     zcps = np.concatenate(([0], np.where(np.diff(zhat))[0] + 1, [zhat.size]))
@@ -172,10 +172,8 @@ def plot_trajectory(zhat, x, ax=None, ls="-"):
                 color=colors[zhat[start]],
                 alpha=1.0)
 
-    # ax.set_xlabel('$x_1$', fontsize=12, labelpad=10)
-    # ax.set_ylabel('$x_2$', fontsize=12, labelpad=10)
-
     return ax
+
 
 def plot_trajectory_and_probs(z, x,
                               ax=None,
@@ -205,36 +203,35 @@ def plot_data(zhat, y, ax=None, ls="-"):
         fig = plt.figure(figsize=(4, 4))
         ax = fig.gca()
     for start, stop in zip(zcps[:-1], zcps[1:]):
-        stop = min(y.shape[0], stop+1)
+        stop = min(y.shape[0], stop + 1)
         ax.plot(np.arange(start, stop),
-                y[start:stop ],
+                y[start:stop],
                 lw=1, ls=ls,
                 color=colors[zhat[start]],
                 alpha=1.0)
 
-    # ax.set_xlabel('$x_1$', fontsize=12, labelpad=10)
-    # ax.set_ylabel('$x_2$', fontsize=12, labelpad=10)
     return ax
 
-def plot_separate_trans_probs(reg, xlim=(-4,4), ylim=(-3,3), n_pts=100, ax=None):
+
+def plot_separate_trans_probs(reg, xlim=(-4, 4), ylim=(-3, 3), n_pts=100, ax=None):
     K = reg.D_out
-    XX,YY = np.meshgrid(np.linspace(*xlim,n_pts),
-                        np.linspace(*ylim,n_pts))
+    XX, YY = np.meshgrid(np.linspace(*xlim, n_pts),
+                         np.linspace(*ylim, n_pts))
     XY = np.column_stack((np.ravel(XX), np.ravel(YY)))
 
     D_reg = reg.D_in
-    inputs = np.hstack((np.zeros((n_pts**2, D_reg-2)), XY))
+    inputs = np.hstack((np.zeros((n_pts ** 2, D_reg - 2)), XY))
     test_prs = reg.pi(inputs)
 
     if ax is None:
-        fig = plt.figure(figsize=(12,3))
+        fig = plt.figure(figsize=(12, 3))
 
     for k in range(K):
-        ax = fig.add_subplot(1,K,k+1)
+        ax = fig.add_subplot(1, K, k + 1)
         cmap = gradient_cmap([np.ones(3), colors[k]])
-        im1 = ax.imshow(test_prs[:,k].reshape(*XX.shape),
-                         extent=xlim + tuple(reversed(ylim)),
-                         vmin=0, vmax=1, cmap=cmap)
+        im1 = ax.imshow(test_prs[:, k].reshape(*XX.shape),
+                        extent=xlim + tuple(reversed(ylim)),
+                        vmin=0, vmax=1, cmap=cmap)
 
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
@@ -242,7 +239,6 @@ def plot_separate_trans_probs(reg, xlim=(-4,4), ylim=(-3,3), n_pts=100, ax=None)
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         plt.colorbar(im1, cax=cax, ax=ax)
-        # ax.set_title("State {}".format(k+1))
 
     plt.tight_layout()
     return ax
@@ -253,9 +249,8 @@ def plot_z_samples(K, zs, zref=None,
                    N_iters=None,
                    title=None,
                    ax=None):
-
     if ax is None:
-        fig = plt.figure(figsize=(10,5))
+        fig = plt.figure(figsize=(10, 5))
         ax = fig.add_subplot(111)
 
     zs = np.array(zs)
@@ -264,12 +259,11 @@ def plot_z_samples(K, zs, zref=None,
     if N_iters is None:
         N_iters = zs.shape[0]
 
-    im = ax.imshow(zs[:,slice(*plt_slice)], aspect='auto', vmin=0, vmax=K-1,
-                     cmap=gradient_cmap(colors[:K]), interpolation="nearest",
-                     extent=plt_slice + (N_iters, 0))
-    # ax.autoscale(False)
+    im = ax.imshow(zs[:, slice(*plt_slice)], aspect='auto', vmin=0, vmax=K - 1,
+                   cmap=gradient_cmap(colors[:K]), interpolation="nearest",
+                   extent=plt_slice + (N_iters, 0))
+
     ax.set_xticks([])
-    # ax.set_yticks([0, N_iters])
     ax.set_ylabel("Iteration")
 
     if zref is not None:
@@ -277,9 +271,8 @@ def plot_z_samples(K, zs, zref=None,
         ax2 = divider.append_axes("bottom", size="10%", pad=0.05)
 
         zref = np.atleast_2d(zref)
-        im = ax2.imshow(zref[:, slice(*plt_slice)], aspect='auto', vmin=0, vmax=K-1,
-                         cmap=gradient_cmap(colors[:K]), interpolation="nearest")
-        # ax2.autoscale(False)
+        im = ax2.imshow(zref[:, slice(*plt_slice)], aspect='auto', vmin=0, vmax=K - 1,
+                        cmap=gradient_cmap(colors[:K]), interpolation="nearest")
         ax.set_xticks([])
         ax2.set_yticks([])
         ax2.set_ylabel("True $z$", rotation=0)
@@ -288,4 +281,3 @@ def plot_z_samples(K, zs, zref=None,
 
     if title is not None:
         ax.set_title(title)
-
