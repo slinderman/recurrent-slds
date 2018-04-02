@@ -351,7 +351,10 @@ class _SoftmaxInputHMMTransitionsHMC(_SoftmaxInputHMMTransitionsBase):
             return
 
         covseqs = [np.row_stack([c, np.zeros(D)]) for c in covseqs]
+
+        # HACK: For now, replace HMC with a deterministic optimization
         self.initialize_with_logistic_regression(stateseqs, covseqs, initialize=True)
+
         # # Run HMC
         # from hips.inference.hmc import hmc
         # def hmc_objective(params):

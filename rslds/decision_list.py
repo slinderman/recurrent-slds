@@ -19,16 +19,7 @@ class RobustLogisticRegression(LogisticRegression):
             self.intercept_ = -3.0
         else:
             super(RobustLogisticRegression, self).fit(X, y, sample_weight=sample_weight)
-#
-#     def predict_proba(self, X):
-#         if X.size == 0:
-#             return 0.0
-#         elif self._all_ones:
-#             return np.ones(X.shape[0])
-#         elif self._all_zeros:
-#             return 0.5 * np.zeros(X.shape[0])
-#         else:
-#             return super(RobustLogisticRegression, self).predict_proba(X)
+
 
 class DecisionList(object):
     """

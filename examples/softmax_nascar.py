@@ -381,8 +381,7 @@ def fit_rslds_variational(
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
         emission_distns=emission_distns,
-        fixed_emission=False,
-        alpha=3.)
+        fixed_emission=False)
 
     # Set the prior precision for the dynamics params
     rslds.add_data(y, inputs=inputs, mask=mask)
@@ -454,8 +453,7 @@ def fit_rslds_vbem(
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
         emission_distns=emission_distns,
-        fixed_emission=False,
-        alpha=3.)
+        fixed_emission=False)
 
     # Set the prior precision for the dynamics params
     rslds.add_data(y, inputs=inputs, mask=mask)

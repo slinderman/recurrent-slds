@@ -31,12 +31,6 @@ def plot_plane(ax3d, normal, point=None, d=0,
     # calculate corresponding z
     zz = (-normal[0] * xx - normal[1] * yy - d) * 1. / normal[2]
 
-    # throw away points outside zlim
-    # good = (zz >= zlim[0]) & (zz <= zlim[1])
-    # xx = xx[good]
-    # yy = yy[good]
-    # zz = zz[good]
-
     # plot the surface
     ax3d.plot_surface(xx, yy, zz, **kwargs)
 
@@ -54,11 +48,6 @@ def plot_2d_plane(ax, normal, point=None, d=0,
 
     # calculate corresponding y
     yy = (-normal[0] * xx - d) * 1. / normal[1]
-
-    # throw away points outside zlim
-    # good = (yy >= ylim[0]) & (yy <= ylim[1])
-    # xx = xx[good]
-    # yy = yy[good]
 
     # plot the surface
     ax.plot(xx, yy, **kwargs)
@@ -163,7 +152,6 @@ def compute_psi_cmoments(alphas):
         density = get_density(alphas[k], alphas[k+1:].sum())
         mu[k] = simps(psi*density(psi),psi)
         sigma[k] = simps(psi**2*density(psi),psi) - mu[k]**2
-        # print '%d: mean=%0.3f var=%0.3f' % (k, mean, s - mean**2)
 
     return mu, sigma
 

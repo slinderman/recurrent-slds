@@ -108,7 +108,7 @@ def plot_most_likely_dynamics(
     return ax
 
 def plot_trans_probs(reg, xlim=(-4,4), ylim=(-3,3), n_pts=50, ax=None):
-    K = reg.D_out
+    K = reg.D_out + 1
 
     XX,YY = np.meshgrid(np.linspace(*xlim,n_pts),
                         np.linspace(*ylim,n_pts))

@@ -22,7 +22,6 @@ class _InputHMMMixin(object):
                  obs_distns,
                  D_in=0,
                  trans_distn=None, trans_params={},
-                 alpha=None, alpha_a_0=None, alpha_b_0=None, trans_matrix=None,
                  init_state_distn=None, init_state_concentration=None, pi_0=None,
                  ):
         self.obs_distns = obs_distns
@@ -107,11 +106,6 @@ class SoftmaxInputHMM(_InputHMMMixin, _HMMGibbsSampling, _HMMEM):
 
     ## EM
     def _M_step_trans_distn(self):
-        # TODO: update this to correct signature
-        # self.trans_distn.max_likelihood(
-        #     expected_stateseqs=[s.expected_states for s in self.states_list],
-        #     expected_covseqs=[s.covariates for s in self.states_list]
-        # )
         zs = [s.expected_states.argmax(1).astype(np.int32) for s in self.states_list]
         xs = [s.covariates for s in self.states_list]
         xs = [np.row_stack([x, np.zeros(x.shape[1])]) for x in xs]
@@ -193,7 +187,6 @@ class _RecurrentARHMMMixin(_InputARHMMMixin):
             covariates = np.zeros((T, 0))
         else:
             assert covariates.shape[0] == T
-
 
         # Initialize discrete state sequence
         pi_0 = self.init_state_distn.pi_0

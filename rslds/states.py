@@ -4,11 +4,9 @@ from scipy.misc import logsumexp
 from pybasicbayes.util.stats import sample_discrete
 from pyhsmm.internals.hmm_states import HMMStatesEigen
 
-from pyslds.states import _SLDSStatesCountData, _SLDSStatesMaskedData, _SLDSStatesVBEM
+from pyslds.states import _SLDSStatesCountData, _SLDSStatesMaskedData
 
-from rslds.util import one_hot, logistic, inhmm_entropy
-
-### Recurrent models build on an input-driven HMM
+from rslds.util import one_hot, logistic
 
 class InputHMMStates(HMMStatesEigen):
 
@@ -20,15 +18,6 @@ class InputHMMStates(HMMStatesEigen):
     def trans_matrix(self):
         return self.model.trans_distn.get_trans_matrices(self.covariates)
 
-    @staticmethod
-    def _sample_markov_hetero(T, trans_matrix_seq, init_state_distn):
-        """utility function - just like sample_markov but with a stack of trans mats"""
-        out = np.empty(T, dtype=np.int32)
-        out[0] = sample_discrete(init_state_distn.ravel())
-        for t in range(1, T):
-            out[t] = sample_discrete(trans_matrix_seq[t - 1, out[t - 1], :].ravel())
-        return out
-
     def generate_states(self, initial_condition=None, with_noise=True, stateseq=None):
         """
         Generate discrete and continuous states.  Note that the handling of 'with_noise'
@@ -36,10 +25,12 @@ class InputHMMStates(HMMStatesEigen):
         likely discrete state, we randomly sample the discrete statse.
         """
         if stateseq is None:
-            self.stateseq = InputHMMStates._sample_markov_hetero(
-                T=self.T,
-                trans_matrix_seq=self.trans_matrix,  # stack of matrices
-                init_state_distn=np.ones(self.num_states) / float(self.num_states))
+            As = self.trans_matrix
+            self.stateseq = -1 * np.ones(self.T, dtype=np.int32)
+            self.stateseq[0] = np.random.choice(self.num_states)
+            for t in range(1, self.T):
+                self.stateseq[t] = sample_discrete(As[t-1, self.stateseq[t-1], :].ravel())
+
         else:
             assert stateseq.shape == (self.T,)
             self.stateseq = stateseq.astype(np.int32)
@@ -297,26 +288,16 @@ class _SoftmaxRecurrentSLDSStatesMeanField(_SoftmaxRecurrentSLDSStatesBase):
         J_rec, h_rec = self.expected_info_rec_params
         return J_node + J_rec, h_node + h_rec, log_Z_node
 
-    ### Updates for q(z)
-    # @property
-    # def mf_trans_matrix(self):
-    #     """
-    #     Eq (31).  need exp { E[ \log \pi(\theta) ]}
-    #     :return:
-    #     """
-    #     return self.trans_distn.exp_expected_logpi
-
     @property
     def mf_aBl(self):
-        aBl = super(_SoftmaxRecurrentSLDSStatesMeanField, self).mf_aBl
-
         # Add in node potentials from transitions
+        aBl = super(_SoftmaxRecurrentSLDSStatesMeanField, self).mf_aBl
         aBl += self._mf_aBl_rec
         return aBl
 
     @property
     def _mf_aBl_rec(self):
-        # Compute the extra node *log* potentials from the transition model
+        # Compute the extra node _log_ potentials from the transition model
         aBl = np.zeros((self.T, self.num_states))
 
         # Eq (34): \psi_{t+1}^{rec} = E [ x_t^\trans W(\theta) ]
@@ -470,11 +451,6 @@ class _SoftmaxRecurrentSLDSStatesMeanField(_SoftmaxRecurrentSLDSStatesBase):
         # Add the variational entropy
         vlb += self._variational_entropy
 
-        # test: compare to old code
-        # vlb2 = super(_SLDSStatesMeanField, self).get_vlb(
-        #         most_recently_updated=False) \
-        #        + self._lds_normalizer
-        # print(vlb - vlb2)
         return vlb
 
     def _init_mf_from_gibbs(self):

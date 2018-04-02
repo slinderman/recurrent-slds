@@ -391,8 +391,7 @@ def simulate_prior():
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
-        emission_distns=emission_distns,
-        alpha=3.)
+        emission_distns=emission_distns)
 
 
     # Print the true parameters
