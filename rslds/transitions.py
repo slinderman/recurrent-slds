@@ -1,6 +1,6 @@
 import numpy as np
 from pypolyagamma import MultinomialRegression, TreeStructuredMultinomialRegression
-from rslds.util import psi_to_pi, one_hot
+from rslds.util import psi_to_pi, one_hot, logistic
 
 class InputHMMTransitions(TreeStructuredMultinomialRegression):
     """
@@ -35,14 +35,9 @@ class InputHMMTransitions(TreeStructuredMultinomialRegression):
         # Add the (K-1) mean
         trans_psi += mu.reshape((self.D_out,))
 
-        # raise NotImplementedError("!!!")
-        # pi_stack = psi_to_pi(trans_psi, axis=2)
-        # pi_stack = np.ascontiguousarray(pi_stack)
-        # Get choice probabilities for each internal node
-        logistic = lambda x: 1./(1 + np.exp(-x))
+        # Get choice probabilities for each internal node and
+        # multiply choice probabilities to get pi
         prs = logistic(trans_psi)
-
-        # Multiply choice probabilities to get pi
         pi = np.empty((X.shape[0], self.K, self.K))
         for k in range(self.K):
             chk = self.choices[k, self.ancestors[k]]
