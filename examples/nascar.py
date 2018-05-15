@@ -424,8 +424,9 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init):
 
     rslds = PGRecurrentOnlySLDS(
         trans_params=dict(sigmasq_A=10000., sigmasq_b=10000.,
-                          A=np.hstack((np.zeros((args.K - 1, args.K)), dl_reg.A)),
-                          b=dl_reg.b),
+                          # A=np.hstack((np.zeros((args.K - 1, args.K)), dl_reg.A)),
+                          # b=dl_reg.b
+                          ),
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
@@ -583,7 +584,9 @@ if __name__ == "__main__":
     x_init[~good_inds] = 0
 
     # Fit a DecisionList to get a permutation of z_init
-    z_perm, dl_reg = fit_decision_list(z_init, x_init)
+    # z_perm, dl_reg = fit_decision_list(z_init, x_init)
+    z_perm = z_init
+    dl_reg = None
 
     # Fit a standard SLDS
     slds, slds_lps, slds_z_smpls, slds_x = \
