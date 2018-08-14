@@ -291,6 +291,32 @@ class StickyPGRecurrentOnlySLDS(PGRecurrentSLDS):
     _trans_class = transitions.StickyInputOnlyHMMTransitions
 
 
+### Tree structured models
+class TreeStructuredPGRecurrentSLDS(PGRecurrentSLDS):
+    """
+    - Pass in a TreeStructuredDynamics object
+    - Exposed self.dynamics_distns as a pointer to dynamics.regressions
+    - Change call to resample_dynamics_distns to pass appropriate inputs
+    """
+    def __init__(self, hierarchical_dynamics_distn, emission_distns, init_dynamics_distns,
+                 fixed_emission=False, **kwargs):
+        # Call the super constructor with the hierarchical dynamics regressions objects
+        self.hierarchical_dynamics_distn = hierarchical_dynamics_distn
+        dynamics_distns = hierarchical_dynamics_distn.regressions
+        super(TreeStructuredPGRecurrentSLDS, self).__init__(
+            dynamics_distns, emission_distns, init_dynamics_distns,
+            fixed_emission=fixed_emission,
+            **kwargs)
+
+    def resample_dynamics_distns(self):
+        zs = [s.stateseq[:-1] for s in self.states_list]
+        xs = [np.hstack((s.gaussian_states[:-1], s.inputs[:-1]))
+              for s in self.states_list]
+        ys = [s.gaussian_states[1:] for s in self.states_list]
+        self.hierarchical_dynamics_distn.resample(list(zip(xs, ys, zs)))
+        self._clear_caches()
+
+
 ### Softmax transition models with variational inference
 class SoftmaxRecurrentSLDS(_RecurrentSLDSBase, _SLDSMeanFieldMixin, _SLDSVBEMMixin, SoftmaxInputHMM):
     _states_class = SoftmaxRecurrentSLDSStates

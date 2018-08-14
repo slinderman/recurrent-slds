@@ -80,8 +80,8 @@ class TreeStructuredHierarchicalDynamics(object):
         self.Q_inv = np.linalg.inv(self.Q)
 
         self.S = S
-        self.D = S.shape[0]
-        assert S.shape == (self.D, self.D)
+        self.D = S.shape[0] - affine
+        assert S.shape == (self.D + affine, self.D + affine)
 
         # Get the precision matrix from the tree-structured prior
         self.adj = adjacency(tree)
@@ -117,11 +117,15 @@ class TreeStructuredHierarchicalDynamics(object):
         _prior(tree, 0)
         self.J_0 = np.kron(J_0, self.S)
 
-        self.As = self.regressions = None
+        self.As = np.zeros((self.N, self.P, self.D))
+        self.regressions = [Regression(A=self.As[l], sigma=self.Q_inv, affine=self.affine)
+                            for l in self.leaves]
+
+        # Resample to populate with a draw from the prior
         self.resample()
 
     def resample(self, data=[]):
-        N, P, D, L = self.N, self.P, self.D, self.L
+        N, P, D, L, affine = self.N, self.P, self.D, self.L, self.affine
 
         if not isinstance(data, list):
             if isinstance(data, tuple) and len(data) == 3:
@@ -131,7 +135,7 @@ class TreeStructuredHierarchicalDynamics(object):
 
         # Prior
         big_J = np.tile(self.J_0[:,:,None], (1, 1, P))
-        big_h = np.zeros((N * D, P))
+        big_h = np.zeros((N * (D + affine), P))
 
         # Likelihood
         for (x, y, z) in data:
@@ -140,7 +144,8 @@ class TreeStructuredHierarchicalDynamics(object):
             # pad x as necessary
             if self.affine:
                 x = np.column_stack((x, np.ones(T)))
-            assert x.shape == (T, D)
+
+            assert x.shape == (T, D + affine)
             assert y.shape == (T, P)
 
             # make sure z is ints between 0 and L-1
@@ -160,14 +165,18 @@ class TreeStructuredHierarchicalDynamics(object):
                     big_J[j*D:(j+1)*D, j*D:(j+1)*D, p] += self.Q[p,p] * xxT
                     big_h[j*D:(j+1)*D, p] += self.Q[p,p] * yxT[p]
 
-        # Sample
-        self.As = np.zeros((N, P, D))
+        # Sample As from their Gaussian conditional
+        self.As = np.zeros((N, P, D + affine))
         for p in range(P):
-            self.As[:,p,:] = sample_gaussian(J=big_J[:,:,p], h=big_h[:,p]).reshape((N, D))
+            self.As[:,p,:] = sample_gaussian(J=big_J[:,:,p], h=big_h[:,p]).reshape((N, D + affine))
 
-        # Make regression objects
-        self.regressions = [Regression(A=self.As[l], sigma=self.Q_inv, affine=self.affine)
-                            for l in self.leaves]
+        # TODO: Resample Q from its conditional... inverse gamma?
+
+        # Set the parameters of the regression object
+        for l, regression in zip(self.leaves, self.regressions):
+            regression.A = self.As[l]
+            # regression.sigma = Q
+
 
 if __name__ == "__main__":
     np.random.seed(0)
@@ -176,7 +185,6 @@ if __name__ == "__main__":
     tree = balanced_binary_tree(16)
     P = 1
     D = 2
-
 
     import matplotlib.pyplot as plt
     plt.figure(figsize=(8,8))
