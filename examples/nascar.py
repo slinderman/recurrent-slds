@@ -19,6 +19,7 @@ from autoregressive.models import ARWeakLimitStickyHDPHMM
 from pyslds.util import get_empirical_ar_params
 from pyslds.models import HMMSLDS
 from pypolyagamma.distributions import MultinomialRegression
+from pypolyagamma.binary_trees import decision_list
 
 from rslds.decision_list import DecisionList
 from rslds.models import PGRecurrentSLDS, StickyPGRecurrentSLDS, \
@@ -114,6 +115,7 @@ def simulate_nascar():
     bs.append(np.array([-0.35, 0.]))
 
     # Construct multinomial regression to divvy up the space #
+    tree = decision_list(K_true)
     w1, b1 = np.array([+1.0, 0.0]), np.array([-2.0])   # x + b > 0 -> x > -b
     w2, b2 = np.array([-1.0, 0.0]), np.array([-2.0])   # -x + b > 0 -> x < b
     w3, b3 = np.array([0.0, +1.0]), np.array([0.0])    # y > 0
@@ -156,7 +158,7 @@ def simulate_nascar():
 
     model = PGRecurrentSLDS(
         trans_params=dict(A=np.hstack((np.zeros((K_true-1, K_true)), reg_W)), b=reg_b,
-                          sigmasq_A=100., sigmasq_b=100.),
+                          sigmasq_A=100., sigmasq_b=100., tree=tree),
         init_state_distn='uniform',
         init_dynamics_distns=init_dynamics_distns,
         dynamics_distns=dynamics_distns,
@@ -435,10 +437,18 @@ def fit_roslds(inputs, z_init, x_init, y, mask, dl_reg, C_init):
 
     rslds.add_data(y, inputs=inputs, mask=mask, stateseq=z_init, gaussian_states=x_init)
 
+    # Resample auxiliary variables
+    for states in rslds.states_list:
+        states.resample_transition_auxiliary_variables()
+
     # Initialize dynamics
     print("Initializing dynamics with Gibbs sampling")
     for itr in tqdm(range(100)):
         rslds.resample_dynamics_distns()
+
+    print("Initializing transitions with Gibbs sampling")
+    for itr in tqdm(range(100)):
+        rslds.resample_trans_distn()
 
     # Fit the model
     lps = []
