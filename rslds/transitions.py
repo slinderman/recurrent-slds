@@ -1,8 +1,8 @@
 import numpy as np
-from pypolyagamma import MultinomialRegression
-from rslds.util import psi_to_pi, one_hot
+from pypolyagamma import MultinomialRegression, TreeStructuredMultinomialRegression
+from rslds.util import psi_to_pi, one_hot, logistic
 
-class InputHMMTransitions(MultinomialRegression):
+class InputHMMTransitions(TreeStructuredMultinomialRegression):
     """
     Model the transition probability as a multinomial
     regression whose inputs include the previous state
@@ -35,9 +35,17 @@ class InputHMMTransitions(MultinomialRegression):
         # Add the (K-1) mean
         trans_psi += mu.reshape((self.D_out,))
 
-        pi_stack = psi_to_pi(trans_psi, axis=2)
-        pi_stack = np.ascontiguousarray(pi_stack)
-        return pi_stack
+        # Get choice probabilities for each internal node and
+        # multiply choice probabilities to get pi
+        prs = logistic(trans_psi)
+        pi = np.empty((X.shape[0], self.K, self.K))
+        for k in range(self.K):
+            chk = self.choices[k, self.ancestors[k]]
+            prk = prs[..., self.ancestors[k]]
+            pi[..., k] = np.prod(chk * prk + (1 - chk) * (1 - prk), axis=-1)
+        assert np.allclose(pi.sum(axis=-1), 1.0)
+
+        return pi
 
     def resample(self, stateseqs=None, covseqs=None, omegas=None, **kwargs):
         """ conditioned on stateseqs and covseqs, stack up all of the data
