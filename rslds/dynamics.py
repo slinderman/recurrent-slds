@@ -26,26 +26,26 @@ class TreeStructuredHierarchicalDynamics(object):
 
     The likelihood at the leaf node is
 
-    log p(y_t | x_t, z_t = n, A_n) = log N(y_t | A_{z_t} x_t, Q^{-1})
+    log p(y_t | x_t, z_t = n, A_n) = log N(y_t | A_n x_t, Q_n^{-1})
 
         = -1/2 (y_t - A_n x_t)^T Q (y_t - A_n x_t) + const
-        = -1/2 x_t^T A_n^T Q A_n x_t + x_t^T A_n^T Q y_t + const
+        = -1/2 x_t^T A_n^T Q_n A_n x_t + x_t^T A_n^T Q_n y_t + const
 
     When Q is diagonal the log probability separates into a sum over
     the output P dimensions
 
-        = -1/2 \sum_p (x_t^T A_{np:} Q_pp A_{np:}^T x_t)
-          + \sum_p x_t^T A_{np:} Q_pp y_tp + const
+        = -1/2 \sum_p (x_t^T A_{np:} Q_{npp} A_{np:}^T x_t)
+          + \sum_p x_t^T A_{np:} Q_{npp} y_tp + const
 
-        = \sum_p -1/2 Tr(A_{np:} A_{np:}^T Q_pp x_t x_t^T)
-          + \sum_p Tr(A_{np:} Q_pp y_tp x_t^T ) + const
+        = \sum_p -1/2 Tr(A_{np:} A_{np:}^T Q_{npp} x_t x_t^T)
+          + \sum_p Tr(A_{np:} Q_{npp} y_tp x_t^T ) + const
 
         = \sum_p -1/2  Tr(A_{np:} A_{np:}^T J_tp) + Tr(A_{np:} h_tp)
 
     where
 
-        J_tp = Q_pp x_t x_t^T
-        h_tp = Q_pp y_tp x_t^T
+        J_tp = Q_{npp} x_t x_t^T
+        h_tp = Q_{npp} y_tp x_t^T
 
     These play nicely with the prior. Let m = par(n) and S = sigma^{-2} I
 
@@ -66,35 +66,39 @@ class TreeStructuredHierarchicalDynamics(object):
     Finally, the root node gets an extra S from its prior.
     """
 
-    def __init__(self, tree, Q, S, affine=True, S_scale=1.5):
+    def __init__(self, tree, P, D, affine=True,
+                 S=None, S_scale=1.5, alpha_0=1, beta_0=1):
         """
-        :param Q: diagonal of the inverse covariance matrix for observations
-        :param S: diagonal of the inverse covariance matrix for the prior
+        :param P: output dimension
+        :param D: input dimension (without affine term)
+        :param affine: whether or not to include an affine term
+        :param S: prior precision for tree-structured weights
+        :param S_scale: scaling factor for precision as a function of depth
+        :param alpha_0: shape of gamma prior on observation noise precision
+        :param beta_0: rate of gamma prior on observation noise precision
         """
         self.tree = tree
         self.affine = affine
 
-        self.Q = Q
-        self.P = Q.shape[0]
-        assert Q.shape == (self.P, self.P)
-        self.Q_inv = np.linalg.inv(self.Q)
+        # Initialize output precision parameters
+        self.P = P                                              # output dimension
+        self.alpha_0 = alpha_0                                  # shape of gamma prior on precision
+        self.beta_0 = beta_0                                    # rate of gamma prior on precision
 
-        self.S = S
-        self.D = S.shape[0] - affine
-        assert S.shape == (self.D + affine, self.D + affine)
+        # Initialize tree-structured prior on regression weights
+        self.D = D
+        self.S = S if S is not None else np.eye(D + affine)     # hierarchical prior precision
+        assert self.S.shape == (self.D + affine, self.D + affine)
 
         # Get the precision matrix from the tree-structured prior
-        self.adj = adjacency(tree)
-        self.N = self.adj.shape[0]
-        self.L = (self.N + 1) // 2
-        # self.J_0 = np.kron(self.adj, -self.S)
-        # self.J_0 += np.kron(np.diag(self.adj.sum(1)), self.S)
-        # self.J_0[:self.D, :self.D] += self.S
+        self.adj = adjacency(tree)                              # adjacency matrix of tree
+        self.N = self.adj.shape[0]                              # number of nodes in tree
+        self.L = (self.N + 1) // 2                              # number of leaves
 
         # Get the indices of the leaves
-        self._ids = ids(tree)
-        self.depths = depths(tree)
-        self.leaves = np.array([self._ids[l] for l in range(self.L)])
+        self._ids = ids(tree)                                   # id's of nodes in tree (in 0...N-1)
+        self.depths = depths(tree)                              # height of nodes in tree
+        self.leaves = np.array([self._ids[l] for l in range(self.L)])   # id's of leaf nodes
 
         # Make the prior precision for the regression matrices
         J_0 = np.zeros((self.N, self.N))
@@ -117,21 +121,27 @@ class TreeStructuredHierarchicalDynamics(object):
         _prior(tree, 0)
         self.J_0 = np.kron(J_0, self.S)
 
+        # Initialize dynamics matrices A and dynamics noise precisions Q
         self.As = np.zeros((self.N, self.P, self.D))
-        self.regressions = [Regression(A=self.As[l], sigma=self.Q_inv, affine=self.affine)
-                            for l in self.leaves]
+        self.Qs = np.tile(np.eye(self.P)[None, :, :], (self.L, 1, 1))
+        self.regressions = [Regression(A=self.As[j], sigma=np.linalg.inv(self.Qs[l]), affine=self.affine)
+                            for (l,j) in enumerate(self.leaves)]
 
         # Resample to populate with a draw from the prior
         self.resample()
 
     def resample(self, data=[]):
-        N, P, D, L, affine = self.N, self.P, self.D, self.L, self.affine
-
         if not isinstance(data, list):
             if isinstance(data, tuple) and len(data) == 3:
                 data = [data]
             else:
                 raise Exception("Expected list or length-3 tuple (x, y, z)!")
+
+        self._resample_dynamics_matrices(data)
+        self._resample_dynamics_precisions(data)
+
+    def _resample_dynamics_matrices(self, data=[]):
+        N, P, D, L, affine = self.N, self.P, self.D, self.L, self.affine
 
         # Prior
         big_J = np.tile(self.J_0[:,:,None], (1, 1, P))
@@ -162,20 +172,63 @@ class TreeStructuredHierarchicalDynamics(object):
 
                 j = self.leaves[l]
                 for p in range(P):
-                    big_J[j*D:(j+1)*D, j*D:(j+1)*D, p] += self.Q[p,p] * xxT
-                    big_h[j*D:(j+1)*D, p] += self.Q[p,p] * yxT[p]
+                    big_J[j*D:(j+1)*D, j*D:(j+1)*D, p] += self.Q[l,p,p] * xxT
+                    big_h[j*D:(j+1)*D, p] += self.Q[l,p,p] * yxT[p]
 
         # Sample As from their Gaussian conditional
         self.As = np.zeros((N, P, D + affine))
         for p in range(P):
             self.As[:,p,:] = sample_gaussian(J=big_J[:,:,p], h=big_h[:,p]).reshape((N, D + affine))
 
-        # TODO: Resample Q from its conditional... inverse gamma?
-
         # Set the parameters of the regression object
         for l, regression in zip(self.leaves, self.regressions):
             regression.A = self.As[l]
-            # regression.sigma = Q
+
+    def _resample_dynamics_precisions(self, data=[]):
+        """
+        Sample the precision matrix Q for the dynamics noise
+        """
+        L, P = self.L, self.P
+
+        # Prior (for each leaf node)
+        alpha = self.alpha_0 * np.ones((L,))
+        beta = self.beta_0 * np.ones((L,P))
+
+        # Likelihood
+        for (x, y, z) in data:
+            T = x.shape[0]
+
+            # pad x as necessary
+            if self.affine:
+                x = np.column_stack((x, np.ones(T)))
+
+            assert x.shape == (T, D + affine)
+            assert y.shape == (T, P)
+
+            # make sure z is ints between 0 and L-1
+            assert z.shape == (T,)
+            assert z.dtype == int and z.min() >= 0 and z.max() < L
+
+            # compute the likelihood for each leaf node
+            for l in range(L):
+                inds = z == l
+                xi = x[inds]
+                yi = y[inds]
+                xxT = (xi[:, :, None] * xi[:, None, :]).sum(0)
+                yxT = (yi[:,:,None] * xi[:, None, :]).sum(0)
+                n = inds.sum()
+
+                # Resample from the gamma posterior
+                AAT = np.array([np.outer(a,a) for a in self.As[l]])
+                alpha[l] += n / 2.0
+                beta[l] += 0.5 * ysq
+                beta[l] += -1.0 * np.sum(yxT * self.As[l], axis=1)
+                beta[l] += 0.5 * np.sum(AAT * xxT, axis=(1,2))
+
+        # Set the parameters of the regression object
+        for l, regression in enumerate(self.regressions):
+            self.Qs[l] = np.diag(np.random.gamma(alpha[l], 1 / beta[l]))
+            regression.sigma = np.diag(1 / np.diag(self.Qs[l]))
 
 
 if __name__ == "__main__":
@@ -198,7 +251,7 @@ if __name__ == "__main__":
             for sp in ax.spines:
                 ax.spines[sp].set_visible(False)
 
-            dynamics = TreeStructuredHierarchicalDynamics(tree, np.eye(P), np.eye(D))
+            dynamics = TreeStructuredHierarchicalDynamics(tree, P, D)
             D = max(dynamics.depths.values())
             for n in range(dynamics.N):
                 d = dynamics.depths[n]
@@ -222,4 +275,4 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.show()
-    
+
